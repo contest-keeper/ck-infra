@@ -200,7 +200,6 @@ resource "azurerm_container_app" "hub" {
   name                         = "ca-${local.base}"
   resource_group_name          = data.azurerm_resource_group.this.name
   container_app_environment_id = local.own_environment ? azurerm_container_app_environment.this[0].id : data.azurerm_container_app_environment.shared[0].id
-  workload_profile_name        = "Consumption"
   revision_mode                = "Single"
   tags                         = var.tags
 
