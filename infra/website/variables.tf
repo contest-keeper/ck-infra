@@ -20,7 +20,7 @@ variable "tags" {
 }
 
 variable "public_hostname" {
-  description = "The name the site answers on, for example dev.contestkeeper.com. It is served through Cloudflare's proxy, which gives it HTTPS: a storage static website cannot do HTTPS on its own name. Needs cloudflare_zone_id. Leave empty to use only the storage address."
+  description = "The name the site answers on, for example dev.contestkeeper.com. It is served through a Cloudflare Worker, which gives it HTTPS: a storage static website cannot do HTTPS on its own name. Needs cloudflare_zone_id and cloudflare_account_id. Leave empty to use only the storage address."
   type        = string
   default     = ""
 
@@ -38,5 +38,16 @@ variable "cloudflare_zone_id" {
   validation {
     condition     = var.cloudflare_zone_id == "" || can(regex("^[0-9a-f]{32}$", var.cloudflare_zone_id))
     error_message = "A Cloudflare zone id is 32 lowercase hex characters (domain Overview page, API section)."
+  }
+}
+
+variable "cloudflare_account_id" {
+  description = "The Cloudflare account that owns the Worker. Not a secret. Leave empty to make no Worker."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.cloudflare_account_id == "" || can(regex("^[0-9a-f]{32}$", var.cloudflare_account_id))
+    error_message = "A Cloudflare account id is 32 lowercase hex characters."
   }
 }
