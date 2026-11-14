@@ -104,7 +104,9 @@ deploy's health check still uses that one.
 **DNS is made by the deploy.** Azure wants two records before it adds the name: a CNAME from the hostname to
 the Container App, and a TXT record `asuid.<hostname>` with the app's verification id. When
 `cloudflare_zone_id` is set, Terraform makes both in Cloudflare (DNS only, not proxied: a proxied record
-hides them from Azure), waits a minute, and then adds the name. Do not make them by hand as well: the
+hides them from Azure), waits a minute, and then adds the name. Adding the name does not make its certificate,
+so the deploy then runs `az containerapp hostname bind`, which makes Azure's free managed certificate and
+attaches it; it waits until the certificate is issued, which can take up to 20 minutes the first time. Do not make them by hand as well: the
 deploy would stop at a record that exists already. For a record that does, delete it in Cloudflare, or
 import it into the Terraform state.
 

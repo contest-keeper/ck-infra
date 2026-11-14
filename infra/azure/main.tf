@@ -343,3 +343,23 @@ resource "azurerm_container_app_custom_domain" "hub" {
     ignore_changes = [certificate_binding_type, container_app_environment_certificate_id]
   }
 }
+
+# Adding the name does not make its certificate: the hostname stays unbound ("Disabled") and HTTPS fails.
+# Azure makes the free managed certificate and attaches it with this command. It waits until the certificate
+# is issued, which can take a while. It runs again only when the hostname or the app is made again, never on
+# an ordinary deploy, and it is safe to repeat. The deploy has signed in with az already.
+resource "terraform_data" "hub_certificate" {
+  count            = var.custom_domain != "" ? 1 : 0
+  triggers_replace = [azurerm_container_app_custom_domain.hub[0].id, azurerm_container_app.hub.id]
+
+  provisioner "local-exec" {
+    command = join(" ", [
+      "az containerapp hostname bind",
+      "--resource-group ${data.azurerm_resource_group.this.name}",
+      "--name ${azurerm_container_app.hub.name}",
+      "--hostname ${var.custom_domain}",
+      "--environment ${local.own_environment ? azurerm_container_app_environment.this[0].id : data.azurerm_container_app_environment.shared[0].id}",
+      "--validation-method CNAME",
+    ])
+  }
+}
