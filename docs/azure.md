@@ -159,6 +159,25 @@ If the deploy still stops with `AuthorizationFailed` and names an action, add th
 the Hub to another environment replaces the Container App: its Azure address changes and the Hub is down for
 a few minutes, so do it on develop first.
 
+## The website's name
+
+The site is plain files in a storage account's static website, which cannot serve HTTPS on a name of your own.
+`public_hostname` in `infra/website/environments/*.tfvars` (develop: `dev.contestkeeper.com`) puts Cloudflare's proxy
+in front of it. When it and `cloudflare_zone_id` are set, the deploy makes, in Cloudflare:
+
+- a proxied CNAME from the public name to the storage's web host,
+- an origin rule that sends the storage's own host name as the Host header (storage answers only to that), and
+- a configuration rule that sets SSL mode Full for this host only (the storage certificate is not for the public
+  name, so Cloudflare must not check it against it).
+
+A zone has one ruleset per phase, and these two are owned by this environment's Terraform. Make no other
+origin or configuration rules in the zone by hand, and do not use them from a second environment: production
+publishes to GitHub Pages instead (the website repository's `pages.yml`), which needs none of this.
+
+What the deploy needs, in the calling repository (`ck-website`): the variable `CLOUDFLARE_ZONE_ID` and, in the
+GitHub environment `develop`, the secret `CLOUDFLARE_API_TOKEN`. The token needs Zone > DNS > Edit, plus the
+permissions to edit origin rules and configuration rules, on that one zone and nothing else.
+
 ## Deploying from your own PC instead
 
 ```sh

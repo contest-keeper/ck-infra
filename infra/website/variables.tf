@@ -18,3 +18,25 @@ variable "tags" {
   type        = map(string)
   default     = { project = "contest-keeper", component = "website" }
 }
+
+variable "public_hostname" {
+  description = "The name the site answers on, for example dev.contestkeeper.com. It is served through Cloudflare's proxy, which gives it HTTPS: a storage static website cannot do HTTPS on its own name. Needs cloudflare_zone_id. Leave empty to use only the storage address."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.public_hostname == "" || can(regex("^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}$", var.public_hostname))
+    error_message = "Use a lowercase hostname such as dev.contestkeeper.com."
+  }
+}
+
+variable "cloudflare_zone_id" {
+  description = "The Cloudflare zone that holds public_hostname. Not a secret. Leave empty to make no DNS record."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.cloudflare_zone_id == "" || can(regex("^[0-9a-f]{32}$", var.cloudflare_zone_id))
+    error_message = "A Cloudflare zone id is 32 lowercase hex characters (domain Overview page, API section)."
+  }
+}
