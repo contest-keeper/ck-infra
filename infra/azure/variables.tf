@@ -97,3 +97,14 @@ variable "shared_environment_resource_group" {
     error_message = "Name the resource group of the shared environment too."
   }
 }
+
+variable "mail_domain" {
+  description = "The domain the Hub sends mail from, for example mail.dev.contestkeeper.com. Mail is set up only when this, cloudflare_zone_id and custom_domain are all set; leave empty for no mail. Each environment needs its own."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.mail_domain == "" || can(regex("^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}$", var.mail_domain))
+    error_message = "Use a lowercase domain such as mail.dev.contestkeeper.com."
+  }
+}
