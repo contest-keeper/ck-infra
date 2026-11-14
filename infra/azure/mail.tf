@@ -39,21 +39,29 @@ resource "azurerm_communication_service" "mail" {
   tags                = var.tags
 }
 
-# The four records Azure asks for: ownership (TXT), SPF (TXT) and two DKIM keys (CNAME). Azure gives the name
-# relative to the domain, "@" for the domain itself.
+# The four records Azure asks for: ownership (TXT), SPF (TXT) and two DKIM keys (CNAME). Azure gives the TXT
+# names as the full domain and the DKIM names relative to it, and may give "@" for the domain itself, so a name
+# that already is (or ends with) the domain is used as it is.
+locals {
+  mail_record = {
+    for kind in local.mail_record_kinds : kind => local.mail ? azurerm_email_communication_service_domain.mail[0].verification_records[0][kind][0] : null
+  }
+  mail_record_name = {
+    for kind, record in local.mail_record : kind => (
+      record.name == "@" || endswith(record.name, var.mail_domain) ? (record.name == "@" ? var.mail_domain : record.name) : "${record.name}.${var.mail_domain}"
+    ) if record != null
+  }
+}
+
 resource "cloudflare_dns_record" "mail" {
   for_each = local.mail ? local.mail_record_kinds : toset([])
   zone_id  = var.cloudflare_zone_id
-  name = (
-    azurerm_email_communication_service_domain.mail[0].verification_records[0][each.key][0].name == "@"
-    ? var.mail_domain
-    : "${azurerm_email_communication_service_domain.mail[0].verification_records[0][each.key][0].name}.${var.mail_domain}"
-  )
-  type    = azurerm_email_communication_service_domain.mail[0].verification_records[0][each.key][0].type
-  content = azurerm_email_communication_service_domain.mail[0].verification_records[0][each.key][0].value
-  ttl     = 1
-  proxied = false
-  comment = "Keeper Hub mail (${var.name}), made by Terraform"
+  name     = local.mail_record_name[each.key]
+  type     = local.mail_record[each.key].type
+  content  = local.mail_record[each.key].value
+  ttl      = 1
+  proxied  = false
+  comment  = "Keeper Hub mail (${var.name}), made by Terraform"
 }
 
 # A new record takes a moment to reach the resolvers Azure asks.
