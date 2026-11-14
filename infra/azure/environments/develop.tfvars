@@ -7,3 +7,4 @@ min_replicas        = 0
 shared_environment_name           = "kc-dash-env"
 shared_environment_resource_group = "rg-kc-dash"
 custom_domain                     = "hub.dev.contestkeeper.com"
+mail_domain                       = "mail.dev.contestkeeper.com"
