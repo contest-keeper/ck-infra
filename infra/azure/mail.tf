@@ -7,7 +7,14 @@ locals {
   # The Hub's links point at its public name, and the records live in the Cloudflare zone.
   mail = var.mail_domain != "" && var.cloudflare_zone_id != "" && var.custom_domain != ""
 
-  mail_record_kinds = toset(["domain", "spf", "dkim", "dkim2"])
+  # The resource key, and which of Azure's records it holds. The two TXT keys were renamed so Terraform replaces
+  # the records an earlier version made under the wrong name (it did not see a difference to correct).
+  mail_record_kinds = {
+    "txt-domain" = "domain"
+    "txt-spf"    = "spf"
+    "dkim"       = "dkim"
+    "dkim2"      = "dkim2"
+  }
 }
 
 resource "azurerm_email_communication_service" "mail" {
@@ -44,17 +51,17 @@ resource "azurerm_communication_service" "mail" {
 # that already is (or ends with) the domain is used as it is.
 locals {
   mail_record = {
-    for kind in local.mail_record_kinds : kind => local.mail ? azurerm_email_communication_service_domain.mail[0].verification_records[0][kind][0] : null
+    for key, kind in local.mail_record_kinds : key => local.mail ? azurerm_email_communication_service_domain.mail[0].verification_records[0][kind][0] : null
   }
   mail_record_name = {
-    for kind, record in local.mail_record : kind => (
+    for key, record in local.mail_record : key => (
       record.name == "@" || endswith(record.name, var.mail_domain) ? (record.name == "@" ? var.mail_domain : record.name) : "${record.name}.${var.mail_domain}"
     ) if record != null
   }
 }
 
 resource "cloudflare_dns_record" "mail" {
-  for_each = local.mail ? local.mail_record_kinds : toset([])
+  for_each = local.mail ? local.mail_record_kinds : {}
   zone_id  = var.cloudflare_zone_id
   name     = local.mail_record_name[each.key]
   type     = local.mail_record[each.key].type
