@@ -33,14 +33,13 @@ resource "azurerm_storage_account_static_website" "site" {
 # ---------------------------------------------------------------- the public name
 
 locals {
-  proxy_site = var.public_hostname != "" && var.cloudflare_zone_id != ""
-  # Cloudflare rules match on the request's host name.
-  on_host = "(http.host eq \"${var.public_hostname}\")"
+  proxy_site = var.public_hostname != "" && var.cloudflare_zone_id != "" && var.cloudflare_account_id != ""
 }
 
-# Cloudflare's proxy answers on the public name and fetches the page from the storage endpoint. Storage only
-# answers to its own host name, so the proxy sends that one (the origin rule), and it does not check the
-# storage certificate against the public name (SSL mode Full, set for this host only).
+# Cloudflare's proxy answers on the public name, and a small Worker fetches the page from the storage endpoint.
+# Storage only answers to its own host name, and rewriting the Host header with a rule is not allowed on every
+# Cloudflare plan, so the Worker makes the request itself. It checks the storage certificate like any browser.
+# The record must be proxied for the Worker to run; where it points does not matter.
 resource "cloudflare_dns_record" "site" {
   count   = local.proxy_site ? 1 : 0
   zone_id = var.cloudflare_zone_id
@@ -52,40 +51,28 @@ resource "cloudflare_dns_record" "site" {
   comment = "Contest Keeper website (${var.name}), made by Terraform"
 }
 
-# A zone has one ruleset per phase. This environment's Terraform owns the two below, so no other tool or
-# environment may make rules in the same phases of this zone.
-resource "cloudflare_ruleset" "site_origin" {
-  count   = local.proxy_site ? 1 : 0
-  zone_id = var.cloudflare_zone_id
-  name    = "Contest Keeper website origin"
-  kind    = "zone"
-  phase   = "http_request_origin"
-
-  rules = [{
-    action      = "route"
-    description = "Send the storage host name to the website storage"
-    enabled     = true
-    expression  = local.on_host
-    action_parameters = {
-      host_header = azurerm_storage_account.site.primary_web_host
-    }
-  }]
+resource "cloudflare_workers_script" "site" {
+  count       = local.proxy_site ? 1 : 0
+  account_id  = var.cloudflare_account_id
+  script_name = "ck-website-${var.name}"
+  main_module = "worker.js"
+  content     = <<-EOT
+    // Serves the website from its storage endpoint under the public name. Made by Terraform.
+    export default {
+      async fetch(request) {
+        const url = new URL(request.url);
+        url.protocol = "https:";
+        url.hostname = "${azurerm_storage_account.site.primary_web_host}";
+        url.port = "";
+        return fetch(new Request(url, request));
+      },
+    };
+  EOT
 }
 
-resource "cloudflare_ruleset" "site_ssl" {
+resource "cloudflare_workers_route" "site" {
   count   = local.proxy_site ? 1 : 0
   zone_id = var.cloudflare_zone_id
-  name    = "Contest Keeper website SSL mode"
-  kind    = "zone"
-  phase   = "http_config_settings"
-
-  rules = [{
-    action      = "set_config"
-    description = "Full: the storage certificate is not for the public name"
-    enabled     = true
-    expression  = local.on_host
-    action_parameters = {
-      ssl = "full"
-    }
-  }]
+  pattern = "${var.public_hostname}/*"
+  script  = cloudflare_workers_script.site[0].script_name
 }

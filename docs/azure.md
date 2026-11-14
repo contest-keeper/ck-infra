@@ -162,21 +162,25 @@ a few minutes, so do it on develop first.
 ## The website's name
 
 The site is plain files in a storage account's static website, which cannot serve HTTPS on a name of your own.
-`public_hostname` in `infra/website/environments/*.tfvars` (develop: `dev.contestkeeper.com`) puts Cloudflare's proxy
-in front of it. When it and `cloudflare_zone_id` are set, the deploy makes, in Cloudflare:
+`public_hostname` in `infra/website/environments/*.tfvars` (develop: `dev.contestkeeper.com`) puts a Cloudflare
+Worker in front of it. When it, `cloudflare_zone_id` and `cloudflare_account_id` are set, the deploy makes, in
+Cloudflare:
 
-- a proxied CNAME from the public name to the storage's web host,
-- an origin rule that sends the storage's own host name as the Host header (storage answers only to that), and
-- a configuration rule that sets SSL mode Full for this host only (the storage certificate is not for the public
-  name, so Cloudflare must not check it against it).
+- a proxied CNAME for the public name (it must be proxied for the Worker to run),
+- a small Worker that fetches the page from the storage's web host and returns it, and
+- a route that sends the public name to that Worker.
 
-A zone has one ruleset per phase, and these two are owned by this environment's Terraform. Make no other
-origin or configuration rules in the zone by hand, and do not use them from a second environment: production
-publishes to GitHub Pages instead (the website repository's `pages.yml`), which needs none of this.
+The Worker makes the request itself because storage answers only to its own host name, and rewriting the Host
+header with an origin rule is not available on every Cloudflare plan (the free plan refuses it). The Worker
+checks the storage certificate like any browser. The free Workers plan allows 100,000 requests a day, plenty
+for a development copy of a website. Production publishes to GitHub Pages instead (the website repository's
+`pages.yml`) and needs none of this.
 
-What the deploy needs, in the calling repository (`ck-website`): the variable `CLOUDFLARE_ZONE_ID` and, in the
-GitHub environment `develop`, the secret `CLOUDFLARE_API_TOKEN`. The token needs Zone > DNS > Edit, plus the
-permissions to edit origin rules and configuration rules, on that one zone and nothing else.
+What the deploy needs, in the calling repository (`ck-website`): the variables `CLOUDFLARE_ZONE_ID` and
+`CLOUDFLARE_ACCOUNT_ID` (neither is secret) and, in the GitHub environment `develop`, the secret
+`CLOUDFLARE_API_TOKEN`. The token needs Zone > DNS > Edit and Zone > Workers Routes > Edit on that one zone, and
+Account > Workers Scripts > Edit on the account, and nothing else.
+
 ## Mail
 
 The Hub sends its sign-up and password-reset mail through Azure Communication Services Email. `mail_domain` in the
