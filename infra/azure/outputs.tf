@@ -33,3 +33,8 @@ output "custom_domain_target" {
   description = "What the CNAME record of the custom domain points to."
   value       = azurerm_container_app.hub.ingress[0].fqdn
 }
+
+output "mail_domain_id" {
+  description = "The resource id of the mail sender domain, for checking its verification by hand. Empty without mail."
+  value       = local.mail ? azurerm_email_communication_service_domain.mail[0].id : ""
+}

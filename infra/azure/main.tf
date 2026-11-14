@@ -213,6 +213,15 @@ resource "azurerm_container_app" "hub" {
     value = azurerm_storage_account.downloads.primary_access_key
   }
 
+  dynamic "secret" {
+    for_each = local.mail ? [1] : []
+
+    content {
+      name  = "mail-key"
+      value = azurerm_communication_service.mail[0].primary_key
+    }
+  }
+
   # The image is private, so Azure signs in to ghcr.io with a token that can only read packages.
   dynamic "secret" {
     for_each = var.registry_password != "" ? [1] : []
@@ -245,6 +254,9 @@ resource "azurerm_container_app" "hub" {
     }
   }
 
+  # The sender must be verified and linked before the Hub starts sending from it.
+  depends_on = [azurerm_communication_service_email_domain_association.mail]
+
   # One copy only: login lockouts are counted in the Hub's memory.
   template {
     min_replicas = var.min_replicas
@@ -274,6 +286,16 @@ resource "azurerm_container_app" "hub" {
       env {
         name        = "CK_DOWNLOAD_KEY"
         secret_name = "download-key"
+      }
+
+      dynamic "env" {
+        for_each = local.mail_env
+
+        content {
+          name        = env.value.name
+          value       = env.value.value
+          secret_name = env.value.secret_name
+        }
       }
 
       liveness_probe {

@@ -177,6 +177,34 @@ publishes to GitHub Pages instead (the website repository's `pages.yml`), which 
 What the deploy needs, in the calling repository (`ck-website`): the variable `CLOUDFLARE_ZONE_ID` and, in the
 GitHub environment `develop`, the secret `CLOUDFLARE_API_TOKEN`. The token needs Zone > DNS > Edit, plus the
 permissions to edit origin rules and configuration rules, on that one zone and nothing else.
+## Mail
+
+The Hub sends its sign-up and password-reset mail through Azure Communication Services Email. `mail_domain` in the
+tfvars (develop: `mail.dev.contestkeeper.com`) turns it on, together with `cloudflare_zone_id` and `custom_domain`.
+The sender is `noreply@<mail_domain>`. Use a subdomain of its own: the root domain's SPF record belongs to the
+email forwarding, and a domain may have only one.
+
+Once per subscription, someone who may change it registers the resource provider (the deploy identity cannot):
+
+```bash
+az provider register --namespace Microsoft.Communication --wait
+```
+
+What a deploy then does, in order: makes the Email Communication Service, the sender domain and the Communication
+Service; makes the four records Azure asks for in Cloudflare (an ownership TXT, an SPF TXT and two DKIM CNAMEs);
+waits a minute; starts the four verifications with `az rest` and waits, at most ten minutes, until all are
+`Verified`; links the domain to the Communication Service; and gives the Container App the endpoint, the sender and
+the access key. The key is a Container App secret and reaches the Hub only as the environment variable
+`CK_ACS_KEY`. It is also in the Terraform state, which is private, like the database address.
+
+To look at a verification by hand:
+
+```bash
+az rest --method get --url "https://management.azure.com$(terraform output -raw mail_domain_id)?api-version=2023-04-01" --query "properties.verificationStates"
+```
+
+Mail is sent per mail, a fraction of a cent each, with no fixed fee. A mail that cannot be sent is logged by the Hub
+with its error and dropped; look in the Container App's console log.
 
 ## Deploying from your own PC instead
 
