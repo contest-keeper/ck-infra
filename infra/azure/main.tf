@@ -148,7 +148,31 @@ resource "azurerm_storage_container" "downloads" {
 
 # ---------------------------------------------------------------- the Hub
 
+# Where the Hub runs. By default it gets an environment of its own. When shared_environment_name is set it joins
+# an existing one instead (a subscription may allow only one regular environment, and only a regular one can
+# have a custom domain). The shared one is only read here: its owner keeps it.
+locals {
+  own_environment = var.shared_environment_name == ""
+}
+
+data "azurerm_container_app_environment" "shared" {
+  count               = local.own_environment ? 0 : 1
+  name                = var.shared_environment_name
+  resource_group_name = var.shared_environment_resource_group
+}
+
+moved {
+  from = azurerm_log_analytics_workspace.this
+  to   = azurerm_log_analytics_workspace.this[0]
+}
+
+moved {
+  from = azurerm_container_app_environment.this
+  to   = azurerm_container_app_environment.this[0]
+}
+
 resource "azurerm_log_analytics_workspace" "this" {
+  count               = local.own_environment ? 1 : 0
   name                = "log-${local.base}"
   resource_group_name = data.azurerm_resource_group.this.name
   location            = data.azurerm_resource_group.this.location
@@ -158,11 +182,12 @@ resource "azurerm_log_analytics_workspace" "this" {
 }
 
 resource "azurerm_container_app_environment" "this" {
+  count                      = local.own_environment ? 1 : 0
   name                       = "cae-${local.base}"
   resource_group_name        = data.azurerm_resource_group.this.name
   location                   = data.azurerm_resource_group.this.location
   logs_destination           = "log-analytics"
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.this[0].id
   tags                       = var.tags
 
   workload_profile {
@@ -174,7 +199,7 @@ resource "azurerm_container_app_environment" "this" {
 resource "azurerm_container_app" "hub" {
   name                         = "ca-${local.base}"
   resource_group_name          = data.azurerm_resource_group.this.name
-  container_app_environment_id = azurerm_container_app_environment.this.id
+  container_app_environment_id = local.own_environment ? azurerm_container_app_environment.this[0].id : data.azurerm_container_app_environment.shared[0].id
   revision_mode                = "Single"
   tags                         = var.tags
 
@@ -186,6 +211,15 @@ resource "azurerm_container_app" "hub" {
   secret {
     name  = "download-key"
     value = azurerm_storage_account.downloads.primary_access_key
+  }
+
+  dynamic "secret" {
+    for_each = local.mail ? [1] : []
+
+    content {
+      name  = "mail-key"
+      value = azurerm_communication_service.mail[0].primary_key
+    }
   }
 
   # The image is private, so Azure signs in to ghcr.io with a token that can only read packages.
@@ -220,6 +254,9 @@ resource "azurerm_container_app" "hub" {
     }
   }
 
+  # The sender must be verified and linked before the Hub starts sending from it.
+  depends_on = [azurerm_communication_service_email_domain_association.mail]
+
   # One copy only: login lockouts are counted in the Hub's memory.
   template {
     min_replicas = var.min_replicas
@@ -251,6 +288,16 @@ resource "azurerm_container_app" "hub" {
         secret_name = "download-key"
       }
 
+      dynamic "env" {
+        for_each = local.mail_env
+
+        content {
+          name        = env.value.name
+          value       = env.value.value
+          secret_name = env.value.secret_name
+        }
+      }
+
       liveness_probe {
         transport = "HTTP"
         path      = "/"
@@ -265,4 +312,76 @@ resource "azurerm_container_app" "hub" {
     }
   }
 
+}
+
+# ---------------------------------------------------------------- custom domain
+
+locals {
+  # Both the hostname and the zone it lives in are needed for Terraform to make the DNS records.
+  manage_dns = var.custom_domain != "" && var.cloudflare_zone_id != ""
+}
+
+# The records Azure looks for before it adds the name. Both stay "DNS only": a proxied record hides them
+# from Azure's check.
+resource "cloudflare_dns_record" "hub_cname" {
+  count   = local.manage_dns ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = var.custom_domain
+  type    = "CNAME"
+  content = azurerm_container_app.hub.ingress[0].fqdn
+  ttl     = 1
+  proxied = false
+  comment = "Keeper Hub (${var.name}), made by Terraform"
+}
+
+resource "cloudflare_dns_record" "hub_verification" {
+  count   = local.manage_dns ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = "asuid.${var.custom_domain}"
+  type    = "TXT"
+  content = azurerm_container_app.hub.custom_domain_verification_id
+  ttl     = 1
+  comment = "Azure domain check for Keeper Hub (${var.name}), made by Terraform"
+}
+
+# A new record takes a moment to reach the resolvers Azure asks.
+resource "time_sleep" "dns" {
+  count           = local.manage_dns ? 1 : 0
+  create_duration = "60s"
+  depends_on      = [cloudflare_dns_record.hub_cname, cloudflare_dns_record.hub_verification]
+}
+
+# Azure checks the DNS records before it adds the name, and then issues and renews a free certificate for
+# it. Without a certificate id Azure makes the managed one itself; it sets the two fields below
+# afterwards, so Terraform must not try to change them back.
+resource "azurerm_container_app_custom_domain" "hub" {
+  count            = var.custom_domain != "" ? 1 : 0
+  name             = var.custom_domain
+  container_app_id = azurerm_container_app.hub.id
+
+  depends_on = [time_sleep.dns]
+
+  lifecycle {
+    ignore_changes = [certificate_binding_type, container_app_environment_certificate_id]
+  }
+}
+
+# Adding the name does not make its certificate: the hostname stays unbound ("Disabled") and HTTPS fails.
+# Azure makes the free managed certificate and attaches it with this command. It waits until the certificate
+# is issued, which can take a while. It runs again only when the hostname or the app is made again, never on
+# an ordinary deploy, and it is safe to repeat. The deploy has signed in with az already.
+resource "terraform_data" "hub_certificate" {
+  count            = var.custom_domain != "" ? 1 : 0
+  triggers_replace = [azurerm_container_app_custom_domain.hub[0].id, azurerm_container_app.hub.id]
+
+  provisioner "local-exec" {
+    command = join(" ", [
+      "az containerapp hostname bind",
+      "--resource-group ${data.azurerm_resource_group.this.name}",
+      "--name ${azurerm_container_app.hub.name}",
+      "--hostname ${var.custom_domain}",
+      "--environment ${local.own_environment ? azurerm_container_app_environment.this[0].id : data.azurerm_container_app_environment.shared[0].id}",
+      "--validation-method CNAME",
+    ])
+  }
 }

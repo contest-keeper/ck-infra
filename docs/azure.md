@@ -90,6 +90,126 @@ Remove `allowed_client_ips` afterwards and apply again, so the database is close
 
 Then tell the Hub about your sticks from Keeper Forge (`ck-forge registry push --hub <address> --user admin`).
 
+## A name of your own for the Hub
+
+**Only in a regular environment.** An *express* Container Apps environment refuses custom domains: the deploy
+stops with `ExpressCustomDomainsNotSupported`. A subscription may allow only one regular environment (the
+student one does), so the Hub can join an existing one instead of making its own, see the next section.
+
+By default the Hub answers on Azure's address (`https://ca-....azurecontainerapps.io`). `custom_domain` in
+the environment's tfvars gives it a name of your own as well, with a free certificate that Azure makes and
+renews. The Hub keeps answering on Azure's address too, and the
+deploy's health check still uses that one.
+
+**DNS is made by the deploy.** Azure wants two records before it adds the name: a CNAME from the hostname to
+the Container App, and a TXT record `asuid.<hostname>` with the app's verification id. When
+`cloudflare_zone_id` is set, Terraform makes both in Cloudflare (DNS only, not proxied: a proxied record
+hides them from Azure), waits a minute, and then adds the name. Adding the name does not make its certificate,
+so the deploy then runs `az containerapp hostname bind`, which makes Azure's free managed certificate and
+attaches it; it waits until the certificate is issued, which can take up to 20 minutes the first time. Do not make them by hand as well: the
+deploy would stop at a record that exists already. For a record that does, delete it in Cloudflare, or
+import it into the Terraform state.
+
+What the deploy needs, once per environment:
+
+| Where | Name | What |
+|---|---|---|
+| The calling repository's GitHub variables (organization or repository) | `CLOUDFLARE_ZONE_ID` | The zone id of the domain (Cloudflare, domain Overview, API section). Not a secret. |
+| The calling repository's GitHub environment `develop` or `production` | secret `CLOUDFLARE_API_TOKEN` | A token with **Zone → DNS → Edit** on that one zone, and nothing else. |
+
+"Calling repository" is `ck-hub` for the deploys it starts after every build, and `ck-infra` for the manual
+`deploy-azure.yml` run. A secret in one of them is not visible to the other, so set it in both.
+
+Without `CLOUDFLARE_ZONE_ID` Terraform makes no records, and you have to create them yourself before the
+deploy. Read the values with `terraform output custom_domain_target` (the CNAME's target) and
+`terraform output custom_domain_verification_id` (the TXT's value).
+
+## Running in an environment that already exists
+
+`shared_environment_name` and `shared_environment_resource_group` in the tfvars make the Hub join an existing
+Container Apps environment instead of making one (develop joins `kc-dash-env`). Terraform only reads that
+environment; it never changes or deletes it. The Hub's own environment and log workspace are not made, and
+its logs go to the shared environment's workspace.
+
+**The deploy identity needs a permission first, or the apply fails after it has removed the old app.** It only
+has rights on its own resource group, so someone who may create role definitions (a subscription owner) gives
+it a narrow role on the one shared environment. It can read the environment, put apps in it and manage its
+managed certificates, and nothing else, so the Hub's pipeline cannot touch what else runs there. Run once:
+
+```bash
+ENV_ID=$(az containerapp env show -g rg-kc-dash -n kc-dash-env --query id -o tsv)
+
+az role definition create --role-definition "{
+  \"Name\": \"Container Apps environment user\",
+  \"Description\": \"Read an environment, join it with an app, manage its managed certificates.\",
+  \"Actions\": [
+    \"Microsoft.App/managedEnvironments/read\",
+    \"Microsoft.App/managedEnvironments/join/action\",
+    \"Microsoft.App/managedEnvironments/managedCertificates/*\"
+  ],
+  \"AssignableScopes\": [\"$ENV_ID\"]
+}"
+
+SP=$(az ad sp show --id "$(gh variable get AZURE_CLIENT_ID_DEVELOP --repo contest-keeper/ck-hub)" --query id -o tsv)
+az role assignment create --assignee-object-id "$SP" --assignee-principal-type ServicePrincipal \
+  --role "Container Apps environment user" --scope "$ENV_ID"
+```
+
+If the deploy still stops with `AuthorizationFailed` and names an action, add that action to the role. Moving
+the Hub to another environment replaces the Container App: its Azure address changes and the Hub is down for
+a few minutes, so do it on develop first.
+
+## The website's name
+
+The site is plain files in a storage account's static website, which cannot serve HTTPS on a name of your own.
+`public_hostname` in `infra/website/environments/*.tfvars` (develop: `dev.contestkeeper.com`) puts a Cloudflare
+Worker in front of it. When it, `cloudflare_zone_id` and `cloudflare_account_id` are set, the deploy makes, in
+Cloudflare:
+
+- a proxied CNAME for the public name (it must be proxied for the Worker to run),
+- a small Worker that fetches the page from the storage's web host and returns it, and
+- a route that sends the public name to that Worker.
+
+The Worker makes the request itself because storage answers only to its own host name, and rewriting the Host
+header with an origin rule is not available on every Cloudflare plan (the free plan refuses it). The Worker
+checks the storage certificate like any browser. The free Workers plan allows 100,000 requests a day, plenty
+for a development copy of a website. Production publishes to GitHub Pages instead (the website repository's
+`pages.yml`) and needs none of this.
+
+What the deploy needs, in the calling repository (`ck-website`): the variables `CLOUDFLARE_ZONE_ID` and
+`CLOUDFLARE_ACCOUNT_ID` (neither is secret) and, in the GitHub environment `develop`, the secret
+`CLOUDFLARE_API_TOKEN`. The token needs Zone > DNS > Edit and Zone > Workers Routes > Edit on that one zone, and
+Account > Workers Scripts > Edit on the account, and nothing else.
+
+## Mail
+
+The Hub sends its sign-up and password-reset mail through Azure Communication Services Email. `mail_domain` in the
+tfvars (develop: `mail.dev.contestkeeper.com`) turns it on, together with `cloudflare_zone_id` and `custom_domain`.
+The sender is `noreply@<mail_domain>`. Use a subdomain of its own: the root domain's SPF record belongs to the
+email forwarding, and a domain may have only one.
+
+Once per subscription, someone who may change it registers the resource provider (the deploy identity cannot):
+
+```bash
+az provider register --namespace Microsoft.Communication --wait
+```
+
+What a deploy then does, in order: makes the Email Communication Service, the sender domain and the Communication
+Service; makes the four records Azure asks for in Cloudflare (an ownership TXT, an SPF TXT and two DKIM CNAMEs);
+waits a minute; starts the four verifications with `az rest` and waits, at most ten minutes, until all are
+`Verified`; links the domain to the Communication Service; and gives the Container App the endpoint, the sender and
+the access key. The key is a Container App secret and reaches the Hub only as the environment variable
+`CK_ACS_KEY`. It is also in the Terraform state, which is private, like the database address.
+
+To look at a verification by hand:
+
+```bash
+az rest --method get --url "https://management.azure.com$(terraform output -raw mail_domain_id)?api-version=2023-04-01" --query "properties.verificationStates"
+```
+
+Mail is sent per mail, a fraction of a cent each, with no fixed fee. A mail that cannot be sent is logged by the Hub
+with its error and dropped; look in the Container App's console log.
+
 ## Deploying from your own PC instead
 
 ```sh
