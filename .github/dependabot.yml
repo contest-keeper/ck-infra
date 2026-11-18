@@ -1,0 +1,46 @@
+version: 2
+updates:
+  - package-ecosystem: terraform
+    directory: /infra/azure
+    target-branch: develop
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+    groups:
+      terraform_infra_azure:
+        patterns: ["*"]
+  - package-ecosystem: terraform
+    directory: /infra/website
+    target-branch: develop
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+    groups:
+      terraform_infra_website:
+        patterns: ["*"]
+  - package-ecosystem: docker-compose
+    directory: /compose
+    target-branch: develop
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+    groups:
+      docker_compose:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+    groups:
+      github_actions:
+        patterns: ["*"]
