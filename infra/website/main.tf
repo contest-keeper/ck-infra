@@ -29,3 +29,50 @@ resource "azurerm_storage_account_static_website" "site" {
   index_document     = "index.html"
   error_404_document = "index.html"
 }
+
+# ---------------------------------------------------------------- the public name
+
+locals {
+  proxy_site = var.public_hostname != "" && var.cloudflare_zone_id != "" && var.cloudflare_account_id != ""
+}
+
+# Cloudflare's proxy answers on the public name, and a small Worker fetches the page from the storage endpoint.
+# Storage only answers to its own host name, and rewriting the Host header with a rule is not allowed on every
+# Cloudflare plan, so the Worker makes the request itself. It checks the storage certificate like any browser.
+# The record must be proxied for the Worker to run; where it points does not matter.
+resource "cloudflare_dns_record" "site" {
+  count   = local.proxy_site ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = var.public_hostname
+  type    = "CNAME"
+  content = azurerm_storage_account.site.primary_web_host
+  ttl     = 1
+  proxied = true
+  comment = "Contest Keeper website (${var.name}), made by Terraform"
+}
+
+resource "cloudflare_workers_script" "site" {
+  count       = local.proxy_site ? 1 : 0
+  account_id  = var.cloudflare_account_id
+  script_name = "ck-website-${var.name}"
+  main_module = "worker.js"
+  content     = <<-EOT
+    // Serves the website from its storage endpoint under the public name. Made by Terraform.
+    export default {
+      async fetch(request) {
+        const url = new URL(request.url);
+        url.protocol = "https:";
+        url.hostname = "${azurerm_storage_account.site.primary_web_host}";
+        url.port = "";
+        return fetch(new Request(url, request));
+      },
+    };
+  EOT
+}
+
+resource "cloudflare_workers_route" "site" {
+  count   = local.proxy_site ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  pattern = "${var.public_hostname}/*"
+  script  = cloudflare_workers_script.site[0].script_name
+}

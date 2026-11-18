@@ -23,3 +23,18 @@ output "download_storage_account" {
   description = "The private storage account that holds the installers."
   value       = azurerm_storage_account.downloads.name
 }
+
+output "custom_domain_verification_id" {
+  description = "The value of the TXT record asuid.<hostname> that proves to Azure you own the custom domain. It goes into a public DNS record, so it is not a secret."
+  value       = nonsensitive(azurerm_container_app.hub.custom_domain_verification_id)
+}
+
+output "custom_domain_target" {
+  description = "What the CNAME record of the custom domain points to."
+  value       = azurerm_container_app.hub.ingress[0].fqdn
+}
+
+output "mail_domain_id" {
+  description = "The resource id of the mail sender domain, for checking its verification by hand. Empty without mail."
+  value       = local.mail ? azurerm_email_communication_service_domain.mail[0].id : ""
+}

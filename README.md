@@ -3,7 +3,11 @@
 Contest Keeper infrastructure: how the Contest Keeper apps are deployed and run. It holds the Terraform, deploy
 workflows and server setups, so the app repositories only hold code.
 
-Today it deploys Keeper Hub ([`ck-hub`](https://github.com/contest-keeper/ck-hub)). Infrastructure for other apps is added here too.
+Today it deploys Keeper Hub ([`ck-hub`](https://github.com/contest-keeper/ck-hub)) and the develop
+website ([`ck-website`](https://github.com/contest-keeper/ck-website), [`infra/website`](infra/website)),
+and it publishes the develop Forge installer for the site's download button. On Azure the Hub can answer on
+its own domain with a managed certificate (DNS records are made in Cloudflare by the deploy) and sends mail
+through Azure Communication Services Email ([`infra/azure/mail.tf`](infra/azure/mail.tf)).
 
 | Way | Folder | For |
 |---|---|---|
