@@ -146,6 +146,15 @@ resource "azurerm_storage_container" "downloads" {
   container_access_type = "private"
 }
 
+# Recordings sticks upload (screen video and snapshots) go to their own private container in the same
+# account. Only the Hub reads and writes it, with short-lived links signed by the account key. The
+# Hub deletes a recording when its retention has passed.
+resource "azurerm_storage_container" "recordings" {
+  name                  = "recordings"
+  storage_account_id    = azurerm_storage_account.downloads.id
+  container_access_type = "private"
+}
+
 # ---------------------------------------------------------------- the Hub
 
 # Where the Hub runs. By default it gets an environment of its own. When shared_environment_name is set it joins
@@ -281,6 +290,11 @@ resource "azurerm_container_app" "hub" {
       env {
         name  = "CK_DOWNLOAD_CONTAINER"
         value = azurerm_storage_container.downloads.name
+      }
+
+      env {
+        name  = "CK_RECORDINGS_CONTAINER"
+        value = azurerm_storage_container.recordings.name
       }
 
       env {
