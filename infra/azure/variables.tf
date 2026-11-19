@@ -23,6 +23,23 @@ variable "image" {
   }
 }
 
+variable "hub_cpu" {
+  description = "CPU of the Hub container. The Hub used about 0.3 core for 500 simulated sticks (ck-hub docs/capacity.md), so 0.25 is too small for a big contest."
+  type        = number
+  default     = 0.5
+
+  validation {
+    condition     = contains([0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2], var.hub_cpu)
+    error_message = "Container Apps takes 0.25 to 2 vCPU in steps of 0.25."
+  }
+}
+
+variable "hub_memory" {
+  description = "Memory of the Hub container. Container Apps wants twice the vCPU, for example 0.5 vCPU with 1Gi."
+  type        = string
+  default     = "1Gi"
+}
+
 variable "min_replicas" {
   description = "0 lets the Hub sleep when idle (the first request then waits a few seconds). 1 keeps it always on."
   type        = number

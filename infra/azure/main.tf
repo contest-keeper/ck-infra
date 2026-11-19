@@ -274,8 +274,8 @@ resource "azurerm_container_app" "hub" {
     container {
       name   = "hub"
       image  = var.image
-      cpu    = 0.25
-      memory = "0.5Gi"
+      cpu    = var.hub_cpu
+      memory = var.hub_memory
 
       env {
         name        = "CK_DATABASE_URL"
