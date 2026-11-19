@@ -8,3 +8,7 @@ shared_environment_name           = "kc-dash-env"
 shared_environment_resource_group = "rg-kc-dash"
 custom_domain                     = "hub.dev.contestkeeper.com"
 mail_domain                       = "mail.dev.contestkeeper.com"
+# The smallest size the Hub runs in. It sleeps when idle, so it costs little; a load test of the
+# develop Hub is the only reason to raise it.
+hub_cpu    = 0.25
+hub_memory = "0.5Gi"
