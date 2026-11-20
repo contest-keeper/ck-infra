@@ -40,6 +40,9 @@ on:
       cloudflare_token:
         description: Cloudflare API token that may edit DNS in the zone of the custom domain, and nothing else
         required: false
+      config_signing_key:
+        description: The key the Hub signs stick settings with (base64 seed). Empty means the Hub cannot sign.
+        required: false
 
 permissions:
   contents: read
@@ -63,6 +66,7 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_image: ghcr.io/contest-keeper/ck-hub:${{ inputs.image_tag }}
       TF_VAR_registry_password: ${{ secrets.registry_token }}
+      TF_VAR_config_signing_key: ${{ secrets.config_signing_key }}
       TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare_token }}
       TF_IN_AUTOMATION: "true"

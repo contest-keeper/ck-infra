@@ -222,6 +222,16 @@ resource "azurerm_container_app" "hub" {
     value = azurerm_storage_account.downloads.primary_access_key
   }
 
+  # The key the Hub signs stick settings with. Without it the Hub answers 503 to a signing request.
+  dynamic "secret" {
+    for_each = var.config_signing_key != "" ? [1] : []
+
+    content {
+      name  = "config-signing-key"
+      value = var.config_signing_key
+    }
+  }
+
   dynamic "secret" {
     for_each = local.mail ? [1] : []
 
@@ -300,6 +310,15 @@ resource "azurerm_container_app" "hub" {
       env {
         name        = "CK_DOWNLOAD_KEY"
         secret_name = "download-key"
+      }
+
+      dynamic "env" {
+        for_each = var.config_signing_key != "" ? [1] : []
+
+        content {
+          name        = "CK_CONFIG_SIGNING_KEY"
+          secret_name = "config-signing-key"
+        }
       }
 
       dynamic "env" {
