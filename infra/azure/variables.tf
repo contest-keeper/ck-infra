@@ -76,6 +76,13 @@ variable "registry_password" {
   sensitive   = true
 }
 
+variable "config_signing_key" {
+  description = "The secret key the Hub signs stick settings with (the Hub's CK_CONFIG_SIGNING_KEY): the base64 seed that `cargo run -p ck-crypto --example config_key` in ck-protocol prints. Keep it in the GitHub secret CK_CONFIG_SIGNING_KEY and never in git. Leave empty and the Hub cannot sign, so Forge can only make sticks for images that accept unsigned settings. Like the database password it is kept in the Terraform state (private, Azure AD only)."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "custom_domain" {
   description = "A hostname the Hub also answers on, for example hub.dev.contestkeeper.com. Azure makes and renews its certificate. The DNS records in docs/azure.md must exist before this is applied. Leave empty to use only Azure's own address."
   type        = string
