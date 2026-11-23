@@ -288,11 +288,6 @@ resource "azurerm_container_app" "hub" {
     identity            = azurerm_user_assigned_identity.hub.id
   }
 
-  secret {
-    name  = "download-key"
-    value = azurerm_storage_account.downloads.primary_access_key
-  }
-
   # The key the Hub signs stick settings with. Without it the Hub answers 503 to a signing request.
   dynamic "secret" {
     for_each = var.config_signing_key != "" ? [1] : []
@@ -366,7 +361,7 @@ resource "azurerm_container_app" "hub" {
         secret_name = "database-url"
       }
 
-      # Names the identity that signs storage links when CK_DOWNLOAD_KEY is not set.
+      # Names the identity that signs storage links.
       env {
         name  = "AZURE_CLIENT_ID"
         value = azurerm_user_assigned_identity.hub.client_id
@@ -385,11 +380,6 @@ resource "azurerm_container_app" "hub" {
       env {
         name  = "CK_RECORDINGS_CONTAINER"
         value = azurerm_storage_container.recordings.name
-      }
-
-      env {
-        name        = "CK_DOWNLOAD_KEY"
-        secret_name = "download-key"
       }
 
       dynamic "env" {

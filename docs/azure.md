@@ -239,9 +239,9 @@ terraform plan -var-file=environments/develop.tfvars     # or production.tfvars
   change and deploy, which brings `allow-azure-services` back.
 - **The Hub's identity replaces keys.** The Container App has a user-assigned identity, made before the app
   because the app's `database-url` secret is a Key Vault reference that names it (the address with the
-  password is no longer a Container App secret). Its roles are listed in the table above. The Hub still gets
-  `CK_DOWNLOAD_KEY` (the storage account key) until it signs its links with a user delegation key instead;
-  that Hub change waits until this one is deployed, then the key and its secret are removed.
+  password is no longer a Container App secret). Its roles are listed in the table above. The Hub no longer gets the storage account key: it signs
+  download and upload links with a user delegation key of this identity, and says so in its log at start
+  (`storage self-test: ... accepts the links`). Rollback: revert the change that removed `CK_DOWNLOAD_KEY` and deploy.
   Terraform's `moved` blocks stay until a plan against every environment's state shows nothing to move (the
   production environment has not been deployed yet, so it cannot be checked from here).
 - **One Hub copy.** Login lockouts live in memory, so more than one copy would let an attacker try the
