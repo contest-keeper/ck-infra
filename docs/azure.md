@@ -13,7 +13,7 @@ What each one contains:
 |---|---|
 | Container App + environment | Runs the Hub image. Azure gives it an `https://....azurecontainerapps.io` address with its own certificate. One copy at most: the Hub counts login lockouts in memory. |
 | PostgreSQL Flexible Server (Burstable B1ms, 32 GB, version 16) | The Hub's data. TLS is required (plain connections are refused), 7 days of backups. |
-| Key Vault | Holds the database address, which contains the password. The Container App reads it through its own managed identity. |
+| Key Vault | Holds the database address, which contains the password. The Container App reads it through its own managed identity (`id-...`), which has only: Key Vault Secrets User on the vault, Storage Blob Delegator on the storage account, Storage Blob Data Reader on the `downloads` container and Storage Blob Data Contributor on the `recordings` container. |
 | Log Analytics workspace | The Hub's logs (30 days). |
 
 Rough cost: about 15 to 25 EUR a month per database (develop has its own), 5 to 10 EUR for a Container App kept
@@ -237,6 +237,13 @@ terraform plan -var-file=environments/develop.tfvars     # or production.tfvars
   fixes it. Rollout: the apply creates the new rules and removes the old one in the same run, so there can be
   a few seconds in which new database connections are refused and requests that need the database fail. Rollback: revert the
   change and deploy, which brings `allow-azure-services` back.
+- **The Hub's identity replaces keys.** The Container App has a user-assigned identity, made before the app
+  because the app's `database-url` secret is a Key Vault reference that names it (the address with the
+  password is no longer a Container App secret). Its roles are listed in the table above. The Hub still gets
+  `CK_DOWNLOAD_KEY` (the storage account key) until it signs its links with a user delegation key instead;
+  that Hub change waits until this one is deployed, then the key and its secret are removed.
+  Terraform's `moved` blocks stay until a plan against every environment's state shows nothing to move (the
+  production environment has not been deployed yet, so it cannot be checked from here).
 - **One Hub copy.** Login lockouts live in memory, so more than one copy would let an attacker try the
   passwords on each. Do not raise `max_replicas` before that state moves into the database.
 - **Updating the Hub** is running the workflow with a new version. Rolling back is running it with the old one.

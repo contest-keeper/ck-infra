@@ -91,8 +91,8 @@ for environment in develop production; do
   done
 
   # Rights on this environment's resource group only. "Role Based Access Control Administrator"
-  # lets Terraform give the Hub's identity read access to the Key Vault; it cannot reach anything
-  # outside the group.
+  # lets Terraform give the Hub's managed identity its roles (read secrets in the Key Vault, sign
+  # storage links, read and write its two containers); it cannot reach anything outside the group.
   group_id=$(az group show --name "${groups[$environment]}" --query id -o tsv)
   for role in "Contributor" "Role Based Access Control Administrator"; do
     az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \

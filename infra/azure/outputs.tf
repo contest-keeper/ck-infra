@@ -38,3 +38,8 @@ output "mail_domain_id" {
   description = "The resource id of the mail sender domain, for checking its verification by hand. Empty without mail."
   value       = local.mail ? azurerm_email_communication_service_domain.mail[0].id : ""
 }
+
+output "hub_identity_client_id" {
+  description = "The client id of the Hub's managed identity, for the Hub's storage sign-in."
+  value       = azurerm_user_assigned_identity.hub.client_id
+}
