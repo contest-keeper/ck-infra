@@ -11,9 +11,8 @@ locals {
   base   = "${var.name}-${local.suffix}"
 }
 
-# The generated password is kept in the Terraform state (private, Azure AD only) because the Container
-# App takes its database address as a plain secret: this subscription allows only one regular
-# Container Apps environment, so the Hub runs in an express environment, which cannot read Key Vault.
+# The generated password is kept in the Terraform state (private, Azure AD only). The Container App no
+# longer holds it: it reads the database address from the Key Vault through its own identity (below).
 resource "random_password" "db" {
   length  = 40
   special = false
@@ -170,6 +169,56 @@ resource "azurerm_storage_container" "recordings" {
   container_access_type = "private"
 }
 
+# ---------------------------------------------------------------- the Hub's identity
+
+# The Hub signs in to Azure as this identity: no key or password in the app. It is made before the app
+# because the app's secret refers to it. The roles are the least it needs.
+resource "azurerm_user_assigned_identity" "hub" {
+  name                = "id-${local.base}"
+  resource_group_name = data.azurerm_resource_group.this.name
+  location            = data.azurerm_resource_group.this.location
+  tags                = var.tags
+}
+
+# Reads the database address from the Key Vault (secrets only, no keys or certificates).
+resource "azurerm_role_assignment" "hub_secrets" {
+  scope                = azurerm_key_vault.this.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.hub.principal_id
+}
+
+# Asks storage for a user delegation key, which signs the short-lived download and upload links
+# (replaces the account key). It lets the holder sign links but not read or write any blob by itself.
+resource "azurerm_role_assignment" "hub_delegator" {
+  scope                = azurerm_storage_account.downloads.id
+  role_definition_name = "Storage Blob Delegator"
+  principal_id         = azurerm_user_assigned_identity.hub.principal_id
+}
+
+# What a link may then reach: installers are only read, recordings are written, read and deleted.
+resource "azurerm_role_assignment" "hub_downloads" {
+  scope                = azurerm_storage_container.downloads.id
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = azurerm_user_assigned_identity.hub.principal_id
+}
+
+resource "azurerm_role_assignment" "hub_recordings" {
+  scope                = azurerm_storage_container.recordings.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.hub.principal_id
+}
+
+# New role assignments take a moment to apply, and the app reads the secret as it starts.
+resource "time_sleep" "hub_roles" {
+  create_duration = "60s"
+  depends_on = [
+    azurerm_role_assignment.hub_secrets,
+    azurerm_role_assignment.hub_delegator,
+    azurerm_role_assignment.hub_downloads,
+    azurerm_role_assignment.hub_recordings,
+  ]
+}
+
 # ---------------------------------------------------------------- the Hub
 
 # Where the Hub runs. By default it gets an environment of its own. When shared_environment_name is set it joins
@@ -227,9 +276,16 @@ resource "azurerm_container_app" "hub" {
   revision_mode                = "Single"
   tags                         = var.tags
 
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.hub.id]
+  }
+
+  # The address (with the password) stays in the Key Vault; the app reads it with its identity.
   secret {
-    name  = "database-url"
-    value = "postgres://ckhub:${random_password.db.result}@${azurerm_postgresql_flexible_server.this.fqdn}:5432/${azurerm_postgresql_flexible_server_database.hub.name}?sslmode=require"
+    name                = "database-url"
+    key_vault_secret_id = azurerm_key_vault_secret.database_url.versionless_id
+    identity            = azurerm_user_assigned_identity.hub.id
   }
 
   secret {
@@ -289,7 +345,10 @@ resource "azurerm_container_app" "hub" {
   }
 
   # The sender must be verified and linked before the Hub starts sending from it.
-  depends_on = [azurerm_communication_service_email_domain_association.mail]
+  depends_on = [
+    azurerm_communication_service_email_domain_association.mail,
+    time_sleep.hub_roles,
+  ]
 
   # One copy only: login lockouts are counted in the Hub's memory.
   template {
