@@ -69,13 +69,28 @@ resource "azurerm_postgresql_flexible_server_configuration" "min_tls" {
   value     = "TLSv1.2"
 }
 
-# The special range 0.0.0.0 means "Azure services": the Container App reaches the database
-# without a fixed address. The database still needs the generated password and TLS.
-resource "azurerm_postgresql_flexible_server_firewall_rule" "azure_services" {
-  name             = "allow-azure-services"
+# Only the Container App's own outbound addresses may reach the database (it is not on a virtual
+# network: the shared environment it joins has none, and a Flexible Server can only be made private
+# at creation). The app lists one to a few addresses; there are a fixed number of rules, and a spare
+# one repeats the last address, so the rule names stay stable while the list is unknown at plan time.
+# Every deploy refreshes them, so a changed address follows the next deploy.
+locals {
+  app_outbound_ips = azurerm_container_app.hub.outbound_ip_addresses
+}
+
+resource "azurerm_postgresql_flexible_server_firewall_rule" "app" {
+  count            = 4
+  name             = "app-outbound-${count.index}"
   server_id        = azurerm_postgresql_flexible_server.this.id
-  start_ip_address = "0.0.0.0"
-  end_ip_address   = "0.0.0.0"
+  start_ip_address = local.app_outbound_ips[min(count.index, length(local.app_outbound_ips) - 1)]
+  end_ip_address   = local.app_outbound_ips[min(count.index, length(local.app_outbound_ips) - 1)]
+
+  lifecycle {
+    precondition {
+      condition     = length(local.app_outbound_ips) >= 1 && length(local.app_outbound_ips) <= 4
+      error_message = "The Container App lists ${length(local.app_outbound_ips)} outbound addresses; the database rules cover 1 to 4."
+    }
+  }
 }
 
 resource "azurerm_postgresql_flexible_server_firewall_rule" "client" {

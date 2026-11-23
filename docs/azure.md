@@ -86,7 +86,7 @@ URL=$(az keyvault secret show --vault-name <key_vault> --name database-url --que
 docker run --rm -it -e CK_DATABASE_URL="$URL" ghcr.io/contest-keeper/ck-hub:0.1.0 create-user admin
 ```
 
-Remove `allowed_client_ips` afterwards and apply again, so the database is closed to everything but Azure.
+Remove `allowed_client_ips` afterwards and apply again, so the database is closed to everything but the Container App.
 
 Then tell the Hub about your sticks from Keeper Forge (`ck-forge registry push --hub <address> --user admin`).
 
@@ -226,9 +226,17 @@ terraform plan -var-file=environments/develop.tfvars     # or production.tfvars
   and handed to the database and the Key Vault through write-only arguments. It is not in the state, the
   plan, a variable or a file. `db_password_version` makes a new one. The deploying identity can read it
   from the Key Vault only through role assignments you control.
-- **The database is reachable from the Azure network, not private.** The rule `0.0.0.0` means "Azure
-  services": a Container App without a virtual network has no fixed address. It still needs the password and
-  TLS. A private setup (virtual network, private DNS) is possible later; it costs more and needs more care.
+- **The database accepts only the Container App's outbound addresses.** It is not private: the shared
+  environment the Hub joins has no virtual network (checked with `az containerapp env show`: no
+  `vnetConfiguration`), and a Flexible Server can only be made private when it is created, so VNet
+  integration or a private endpoint is not on offer here. Instead Terraform makes four firewall rules
+  `app-outbound-0` to `-3` from the app's `outbound_ip_addresses` (one to four addresses; a spare rule
+  repeats the last one) and no longer has the `0.0.0.0` "Azure services" rule, so other Azure customers can
+  no longer reach the port. The password and TLS are still needed. If Azure changes the app's addresses, the
+  Hub cannot reach the database until the next deploy refreshes the rules; running **Deploy to Azure** again
+  fixes it. Rollout: the apply creates the new rules and removes the old one in the same run, so there can be
+  a few seconds in which new database connections are refused and requests that need the database fail. Rollback: revert the
+  change and deploy, which brings `allow-azure-services` back.
 - **One Hub copy.** Login lockouts live in memory, so more than one copy would let an attacker try the
   passwords on each. Do not raise `max_replicas` before that state moves into the database.
 - **Updating the Hub** is running the workflow with a new version. Rolling back is running it with the old one.
