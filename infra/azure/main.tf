@@ -366,6 +366,12 @@ resource "azurerm_container_app" "hub" {
         secret_name = "database-url"
       }
 
+      # Names the identity that signs storage links when CK_DOWNLOAD_KEY is not set.
+      env {
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.hub.client_id
+      }
+
       env {
         name  = "CK_DOWNLOAD_ACCOUNT"
         value = azurerm_storage_account.downloads.name
