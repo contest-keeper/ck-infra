@@ -72,20 +72,20 @@ jobs:
           echo "SITE=$site" >> "$GITHUB_ENV"
       - name: Upload the files to private storage
         run: |
-          az storage blob upload-batch --account-name "$DOWNLOADS" --auth-mode key \
+          az storage blob upload-batch --account-name "$DOWNLOADS" --auth-mode login \
             --destination downloads --destination-path "${FOLDER}" \
             --source files --overwrite --only-show-errors
       - name: Publish the version on the site
         run: |
           jq -n --arg version "$VERSION" '{version: $version}' > latest.json
-          az storage blob upload --account-name "$SITE" --auth-mode key \
+          az storage blob upload --account-name "$SITE" --auth-mode login \
             --container-name "\$web" --name "downloads/${FOLDER}/latest.json" --file latest.json \
             --content-cache-control "no-cache" --overwrite --only-show-errors
           # Earlier runs put the files on the public site. They are only served through the Hub now.
-          az storage blob list --account-name "$SITE" --auth-mode key --container-name "\$web" \
+          az storage blob list --account-name "$SITE" --auth-mode login --container-name "\$web" \
             --prefix "downloads/${FOLDER}/" --query "[?name!='downloads/${FOLDER}/latest.json'].name" -o tsv > stale.txt
           while read -r name; do
-            az storage blob delete --account-name "$SITE" --auth-mode key --container-name "\$web" --name "$name" --only-show-errors
+            az storage blob delete --account-name "$SITE" --auth-mode login --container-name "\$web" --name "$name" --only-show-errors
           done < stale.txt
       - name: Show the address
         run: |

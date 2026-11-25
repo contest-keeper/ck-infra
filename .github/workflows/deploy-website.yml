@@ -93,7 +93,7 @@ jobs:
           echo "SITE_URL=$(terraform output -raw public_url)" >> "$GITHUB_ENV"
       - name: Upload the site
         run: |
-          az storage blob upload-batch --account-name "$ACCOUNT" --auth-mode key \
+          az storage blob upload-batch --account-name "$ACCOUNT" --auth-mode login \
             --destination "\$web" --source site-dist --overwrite --only-show-errors
       - name: Show the address
         run: |

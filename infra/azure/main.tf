@@ -158,7 +158,11 @@ resource "azurerm_storage_account" "downloads" {
   min_tls_version                 = "TLS1_2"
   https_traffic_only_enabled      = true
   allow_nested_items_to_be_public = false
-  tags                            = merge(var.tags, { component = "downloads" })
+  # No account key can sign or read anything: the Hub signs links with its identity, and the publish
+  # workflow uploads with the deploy identity (its data role comes from bootstrap.sh). Apply this only
+  # after publish-download.yml uses `--auth-mode login`, or the publish step fails.
+  shared_access_key_enabled = false
+  tags                      = merge(var.tags, { component = "downloads" })
 
   # A plan that would delete or replace the account (and the recordings in it) fails here.
   lifecycle {
