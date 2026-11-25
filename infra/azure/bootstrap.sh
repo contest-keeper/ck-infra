@@ -4,7 +4,8 @@
 #
 #   - a resource group per environment (rg-ckhub-dev for develop, rg-ckhub for production) and one
 #     for the Terraform state;
-#   - a storage account for the state (no public access, no shared keys, versioned);
+#   - a storage account for the state (no public access, no shared keys, versioned), with one container
+#     per environment, so an environment's identity can only reach its own state;
 #   - per environment, an Entra application that GitHub Actions signs in as through OIDC. There is
 #     NO client secret and nothing to rotate: GitHub proves who it is with a short-lived token, and
 #     Azure only accepts it for that environment of the listed repositories. Each application has
@@ -62,7 +63,26 @@ az role assignment create --assignee-object-id "$me" --assignee-principal-type U
   --role "Storage Blob Data Contributor" --scope "$storage_id" --output none
 echo "Waiting for the role to apply..."
 sleep 45
-az storage container create --name tfstate --account-name "$storage_account" --auth-mode login --output none
+# One state container per environment. Each identity gets its role on its own container only (below), so a
+# develop deploy can neither read nor change the production state (which holds the database password).
+for environment in develop production; do
+  az storage container create --name "tfstate-${environment}" --account-name "$storage_account" \
+    --auth-mode login --output none
+done
+
+# The roles the identities may hand out (Terraform gives them to the Hub and to the deployer). The
+# Role Based Access Control Administrator role is limited to these by a condition, so a stolen identity
+# cannot make itself Owner.
+assignable_ids=""
+for role in "Key Vault Secrets Officer" "Key Vault Secrets User" "Storage Blob Delegator" \
+  "Storage Blob Data Reader" "Storage Blob Data Contributor"; do
+  id=$(az role definition list --name "$role" --query "[0].name" -o tsv)
+  [[ -n "$id" ]] || { echo "Role not found: $role" >&2; exit 1; }
+  assignable_ids="${assignable_ids:+$assignable_ids, }$id"
+done
+write_ok="!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'}) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${assignable_ids}})"
+delete_ok="!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'}) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${assignable_ids}})"
+rbac_condition="((${write_ok})) AND ((${delete_ok}))"
 
 # One identity per environment.
 declare -A client_ids
@@ -92,17 +112,37 @@ for environment in develop production; do
 
   # Rights on this environment's resource group only. "Role Based Access Control Administrator"
   # lets Terraform give the Hub's managed identity its roles (read secrets in the Key Vault, sign
-  # storage links, read and write its two containers); it cannot reach anything outside the group.
+  # storage links, read and write its two containers); the condition above limits it to those roles, and
+  # it cannot reach anything outside the group. "Storage Blob Data Contributor" lets the publish and
+  # website workflows upload with the identity (no storage account key) to the accounts in the group.
   group_id=$(az group show --name "${groups[$environment]}" --query id -o tsv)
-  for role in "Contributor" "Role Based Access Control Administrator"; do
+  for role in "Contributor" "Storage Blob Data Contributor"; do
     az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \
       --role "$role" --scope "$group_id" --output none
   done
+  # An assignment made before the condition existed is replaced, so a re-run tightens it.
+  for old in $(az role assignment list --assignee "$principal_id" --scope "$group_id" \
+    --role "Role Based Access Control Administrator" --query "[?scope=='$group_id'].id" -o tsv); do
+    az role assignment delete --ids "$old" --output none
+  done
   az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \
-    --role "Storage Blob Data Contributor" --scope "$storage_id" --output none
+    --role "Role Based Access Control Administrator" --scope "$group_id" \
+    --condition "$rbac_condition" --condition-version "2.0" --output none
+  # The state of this environment only: its own container, not the whole state account.
+  state_container_id="${storage_id}/blobServices/default/containers/tfstate-${environment}"
+  az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \
+    --role "Storage Blob Data Contributor" --scope "$state_container_id" --output none
   # Terraform looks the state account up through its resource group before it reads the blob.
   az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \
     --role "Reader" --scope "$state_group_id" --output none
+  # Set REMOVE_OLD_STATE_ROLE=1 once the state has moved to tfstate-<environment> (see the migration steps): drops the
+  # old role on the whole account, which let this identity reach the other environment's state.
+  if [[ "${REMOVE_OLD_STATE_ROLE:-0}" == 1 ]]; then
+    for old in $(az role assignment list --assignee "$principal_id" --scope "$storage_id" \
+      --role "Storage Blob Data Contributor" --query "[?scope=='$storage_id'].id" -o tsv); do
+      az role assignment delete --ids "$old" --output none
+    done
+  fi
   client_ids[$environment]="$client_id"
 done
 
