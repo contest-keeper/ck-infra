@@ -121,6 +121,7 @@ for environment in develop production; do
       --role "$role" --scope "$group_id" --output none
   done
   # An assignment made before the condition existed is replaced, so a re-run tightens it.
+  # shellcheck disable=SC2046 # ids from tsv have no spaces
   for old in $(az role assignment list --assignee "$principal_id" --scope "$group_id" \
     --role "Role Based Access Control Administrator" --query "[?scope=='$group_id'].id" -o tsv); do
     az role assignment delete --ids "$old" --output none
@@ -138,6 +139,7 @@ for environment in develop production; do
   # Set REMOVE_OLD_STATE_ROLE=1 once the state has moved to tfstate-<environment> (see the migration steps): drops the
   # old role on the whole account, which let this identity reach the other environment's state.
   if [[ "${REMOVE_OLD_STATE_ROLE:-0}" == 1 ]]; then
+    # shellcheck disable=SC2046 # ids from tsv have no spaces
     for old in $(az role assignment list --assignee "$principal_id" --scope "$storage_id" \
       --role "Storage Blob Data Contributor" --query "[?scope=='$storage_id'].id" -o tsv); do
       az role assignment delete --ids "$old" --output none
