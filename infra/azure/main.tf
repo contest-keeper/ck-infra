@@ -43,6 +43,8 @@ resource "azurerm_postgresql_flexible_server" "this" {
   tags                          = var.tags
 
   lifecycle {
+    # A plan that would delete or replace the database fails here instead of being applied.
+    prevent_destroy = true
     # The zone Azure picks at creation must not make Terraform want to move the server.
     ignore_changes = [zone]
   }
@@ -112,6 +114,11 @@ resource "azurerm_key_vault" "this" {
   purge_protection_enabled   = true
   soft_delete_retention_days = 30
   tags                       = var.tags
+
+  # A plan that would delete or replace the vault fails here instead of being applied.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_role_assignment" "deployer_secrets" {
@@ -152,6 +159,11 @@ resource "azurerm_storage_account" "downloads" {
   https_traffic_only_enabled      = true
   allow_nested_items_to_be_public = false
   tags                            = merge(var.tags, { component = "downloads" })
+
+  # A plan that would delete or replace the account (and the recordings in it) fails here.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_storage_container" "downloads" {
