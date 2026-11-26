@@ -1,6 +1,7 @@
 variable "name" {
-  description = "Short name used in resource names. Lowercase letters and digits, at most 14."
+  description = "Short name used in resource names. Lowercase letters and digits, at most 14. The same in every environment: each one has its own subscription."
   type        = string
+  default     = "ckweb"
 
   validation {
     condition     = can(regex("^[a-z0-9]{3,14}$", var.name))
@@ -11,6 +12,7 @@ variable "name" {
 variable "resource_group_name" {
   description = "The resource group bootstrap.sh made for this environment. Everything is created inside it, in its region."
   type        = string
+  default     = "rg-ckhub"
 }
 
 variable "tags" {

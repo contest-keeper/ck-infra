@@ -11,6 +11,9 @@ name: Deploy Hub (reusable)
 # The non-secret identifiers come from GitHub variables (organization or repository level):
 #   AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, TFSTATE_RESOURCE_GROUP, TFSTATE_STORAGE,
 #   AZURE_CLIENT_ID_DEVELOP, AZURE_CLIENT_ID_PRODUCTION   (bootstrap.sh prints them)
+#   HUB_DOMAIN, MAIL_DOMAIN   (per environment: where the Hub answers and sends mail from, for example hub.dev.contestkeeper.com
+#                              and mail.dev.contestkeeper.com. Empty: no custom domain / no mail)
+#   IMAGE_PUBLISHER_SUBJECT   (develop: the GitHub OIDC subject of the ck-os image workflow. Empty: no publisher identity)
 #   CLOUDFLARE_ZONE_ID   (the zone of the custom domain; not a secret. Empty: Terraform makes no DNS records)
 
 on:
@@ -68,6 +71,10 @@ jobs:
       TF_VAR_registry_password: ${{ secrets.registry_token }}
       TF_VAR_config_signing_key: ${{ secrets.config_signing_key }}
       TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+      # Per environment, so another deployment (a contest's own Hub) only needs other variables. Empty: no custom domain / no mail.
+      TF_VAR_custom_domain: ${{ vars.HUB_DOMAIN }}
+      TF_VAR_mail_domain: ${{ vars.MAIL_DOMAIN }}
+      TF_VAR_image_publisher_subject: ${{ vars.IMAGE_PUBLISHER_SUBJECT }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare_token }}
       TF_IN_AUTOMATION: "true"
       # Only whether it is set, never its value.

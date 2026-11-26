@@ -45,6 +45,8 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       TF_IN_AUTOMATION: "true"
       TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+      # Per environment (empty: only the storage address).
+      TF_VAR_public_hostname: ${{ vars.WEBSITE_DOMAIN }}
       TF_VAR_cloudflare_account_id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare_token }}
     steps:

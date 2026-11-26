@@ -504,3 +504,32 @@ resource "terraform_data" "hub_certificate" {
     ])
   }
 }
+
+# ---------------------------------------------------------------- image publisher
+
+# The identity the Keeper OS image workflow (ck-os) signs in as to upload an image to the downloads container.
+# Only when image_publisher_subject is set (develop); production gets its images through a release instead.
+resource "azurerm_user_assigned_identity" "image_publisher" {
+  count               = var.image_publisher_subject != "" ? 1 : 0
+  name                = "id-${local.base}-image-publish"
+  resource_group_name = data.azurerm_resource_group.this.name
+  location            = data.azurerm_resource_group.this.location
+  tags                = var.tags
+}
+
+resource "azurerm_federated_identity_credential" "image_publisher" {
+  count                     = var.image_publisher_subject != "" ? 1 : 0
+  name                      = "github-image-publish"
+  user_assigned_identity_id = azurerm_user_assigned_identity.image_publisher[0].id
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = var.image_publisher_subject
+  audience                  = ["api://AzureADTokenExchange"]
+}
+
+# The container only, not the account: the publisher cannot reach the recordings.
+resource "azurerm_role_assignment" "image_publisher" {
+  count                = var.image_publisher_subject != "" ? 1 : 0
+  scope                = azurerm_storage_container.downloads.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.image_publisher[0].principal_id
+}
