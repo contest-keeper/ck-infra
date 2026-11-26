@@ -2,6 +2,6 @@
 # One state file per environment: key = "ck-hub-develop.tfstate" or "ck-hub-production.tfstate".
 resource_group_name  = "rg-ckhub-tfstate"
 storage_account_name = "REPLACE_WITH_STORAGE_ACCOUNT"
-container_name       = "tfstate"
+container_name       = "tfstate-production"   # tfstate-develop for develop
 key                  = "ck-hub-production.tfstate"
 use_azuread_auth     = true

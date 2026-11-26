@@ -31,6 +31,8 @@ provider "azurerm" {
   # Resource providers are registered once by bootstrap.sh. The deploy identity only has rights
   # on its own resource group, so it must not try to register them at subscription level.
   resource_provider_registrations = "none"
+  # Storage is reached with the deploy identity, not an account key (the downloads account has keys off).
+  storage_use_azuread = true
   # The subscription comes from ARM_SUBSCRIPTION_ID (the deploy workflow sets it) or `az login`.
   # Nothing in this folder holds a credential: the workflow signs in with OIDC.
 }
