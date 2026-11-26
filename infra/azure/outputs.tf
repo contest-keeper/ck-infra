@@ -43,3 +43,8 @@ output "hub_identity_client_id" {
   description = "The client id of the Hub's managed identity, for the Hub's storage sign-in."
   value       = azurerm_user_assigned_identity.hub.client_id
 }
+
+output "image_publisher_client_id" {
+  description = "Client id of the image publisher identity: the ck-os variable CK_IMAGE_PUBLISH_CLIENT_ID. Empty when image_publisher_subject is not set."
+  value       = one(azurerm_user_assigned_identity.image_publisher[*].client_id)
+}

@@ -2,7 +2,7 @@
 # One-time setup for deploying Keeper Hub to Azure. Run it yourself, signed in with `az login`, in
 # the subscription that will hold the Hub. It makes:
 #
-#   - a resource group per environment (rg-ckhub-dev for develop, rg-ckhub for production) and one
+#   - the resource group rg-ckhub for the environment (the subscription says which one it is) and one
 #     for the Terraform state;
 #   - a storage account for the state (no public access, no shared keys, versioned), with one container
 #     per environment, so an environment's identity can only reach its own state;
@@ -14,33 +14,42 @@
 # It prints the values to set as GitHub variables. They are identifiers, not secrets.
 # Safe to run twice: what exists is reused.
 #
-# Usage: bash bootstrap.sh [location] [github-owner]
+# Usage: bash bootstrap.sh <develop|production> <location> [github-owner]
+# Each environment has its own Azure subscription (contest-keeper-dev, contest-keeper-prod): run this once per
+# subscription, with that subscription selected (`az account set`), and name its environment.
 set -euo pipefail
+# Git Bash on Windows would rewrite arguments that start with /subscriptions/ into Windows paths.
+export MSYS_NO_PATHCONV=1
 
-location="${1:-westeurope}"
-owner="${2:-contest-keeper}"
+# Guard: an environment named by mistake would put its resources and roles in the wrong subscription.
+case "${1:-}" in
+  develop | production) environments=("$1") ;;
+  *) echo "Usage: bash bootstrap.sh <develop|production> <location> [github-owner]" >&2; exit 1 ;;
+esac
+location="${2:?Give the region, for example germanywestcentral: a new subscription may not accept every region}"
+owner="${3:-contest-keeper}"
 # The repositories whose workflows deploy: ck-hub after its builds and releases, ck-infra by hand.
 repos=("ck-hub" "ck-infra")
 state_group="rg-ckhub-tfstate"
-# environment -> resource group (must match infra/azure/environments/*.tfvars)
-declare -A groups=([develop]="rg-ckhub-dev" [production]="rg-ckhub")
+# The subscription is the environment, so the group has the same name in each (must match variables.tf).
+env_group="rg-ckhub"
 
 subscription_id=$(az account show --query id -o tsv)
 tenant_id=$(az account show --query tenantId -o tsv)
 echo "Subscription: $(az account show --query name -o tsv) ($subscription_id)"
-read -r -p "Set up Keeper Hub (develop and production) in this subscription? [y/N] " answer
+read -r -p "Set up Keeper Hub (${environments[0]}) in this subscription? [y/N] " answer
 [[ "$answer" == "y" || "$answer" == "Y" ]] || { echo "Stopped."; exit 1; }
 
 # Resource providers are registered here, once, because the identities GitHub signs in as have no
 # rights outside their resource group (the Terraform provider is told not to register them).
 for namespace in Microsoft.App Microsoft.DBforPostgreSQL Microsoft.KeyVault Microsoft.OperationalInsights \
-  Microsoft.ManagedIdentity Microsoft.Storage Microsoft.Authorization Microsoft.Network; do
+  Microsoft.ManagedIdentity Microsoft.Storage Microsoft.Authorization Microsoft.Network Microsoft.Communication; do
   az provider register --namespace "$namespace" --wait
 done
 
 az group create --name "$state_group" --location "$location" --output none
-for environment in develop production; do
-  az group create --name "${groups[$environment]}" --location "$location" --output none
+for environment in "${environments[@]}"; do
+  az group create --name "$env_group" --location "$location" --output none
 done
 
 # The state account name must be globally unique: keep the one made earlier, if there is one.
@@ -65,7 +74,7 @@ echo "Waiting for the role to apply..."
 sleep 45
 # One state container per environment. Each identity gets its role on its own container only (below), so a
 # develop deploy can neither read nor change the production state (which holds the database password).
-for environment in develop production; do
+for environment in "${environments[@]}"; do
   az storage container create --name "tfstate-${environment}" --account-name "$storage_account" \
     --auth-mode login --output none
 done
@@ -86,7 +95,7 @@ rbac_condition="((${write_ok})) AND ((${delete_ok}))"
 
 # One identity per environment.
 declare -A client_ids
-for environment in develop production; do
+for environment in "${environments[@]}"; do
   app_name="ck-hub-deploy-${environment}"
   client_id=$(az ad app list --display-name "$app_name" --query "[0].appId" -o tsv)
   if [[ -z "$client_id" ]]; then
@@ -115,7 +124,7 @@ for environment in develop production; do
   # storage links, read and write its two containers); the condition above limits it to those roles, and
   # it cannot reach anything outside the group. "Storage Blob Data Contributor" lets the publish and
   # website workflows upload with the identity (no storage account key) to the accounts in the group.
-  group_id=$(az group show --name "${groups[$environment]}" --query id -o tsv)
+  group_id=$(az group show --name "$env_group" --query id -o tsv)
   for role in "Contributor" "Storage Blob Data Contributor"; do
     az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \
       --role "$role" --scope "$group_id" --output none
@@ -150,19 +159,32 @@ done
 
 cat <<EOF
 
-Done. Set these as GitHub variables (identifiers, not secrets). Organization level is easiest, so
-ck-hub and ck-infra both see them:
+Done. Set these as GitHub variables (identifiers, not secrets). The tenant and the client ids are the
+same for every subscription, so they are organization variables. The subscription and the state account
+differ per environment, so they are variables of the ${environments[0]} environment in each repository
+(an environment variable wins over an organization one of the same name):
 
-  gh variable set AZURE_TENANT_ID           --org ${owner} --visibility all --body "${tenant_id}"
-  gh variable set AZURE_SUBSCRIPTION_ID     --org ${owner} --visibility all --body "${subscription_id}"
-  gh variable set TFSTATE_RESOURCE_GROUP    --org ${owner} --visibility all --body "${state_group}"
-  gh variable set TFSTATE_STORAGE           --org ${owner} --visibility all --body "${storage_account}"
-  gh variable set AZURE_CLIENT_ID_DEVELOP    --org ${owner} --visibility all --body "${client_ids[develop]}"
-  gh variable set AZURE_CLIENT_ID_PRODUCTION --org ${owner} --visibility all --body "${client_ids[production]}"
+  gh variable set AZURE_TENANT_ID                       --org ${owner} --visibility all --body "${tenant_id}"
+  gh variable set AZURE_CLIENT_ID_${environments[0]^^}  --org ${owner} --visibility all --body "${client_ids[${environments[0]}]}"
+EOF
+# Reusable workflows read the variables of the repository that calls them: the website and Forge call the develop
+# deploy and publish workflows too.
+variable_repos=("${repos[@]}")
+[[ "${environments[0]}" == develop ]] && variable_repos+=("ck-forge" "ck-website")
+for repo in "${variable_repos[@]}"; do
+  cat <<EOF
+  gh api -X PUT repos/${owner}/${repo}/environments/${environments[0]} --silent
+  gh variable set AZURE_SUBSCRIPTION_ID  --repo ${owner}/${repo} --env ${environments[0]} --body "${subscription_id}"
+  gh variable set TFSTATE_RESOURCE_GROUP --repo ${owner}/${repo} --env ${environments[0]} --body "${state_group}"
+  gh variable set TFSTATE_STORAGE        --repo ${owner}/${repo} --env ${environments[0]} --body "${storage_account}"
+EOF
+done
+cat <<EOF
 
-Then, in each of ${repos[*]} (Settings > Environments), make the environments develop and
-production. Production: add yourself as a required reviewer and allow deployments from the main
-branch only. Develop: allow the develop branch only. See docs/azure.md.
+Remove the old organization variables AZURE_SUBSCRIPTION_ID, TFSTATE_RESOURCE_GROUP and TFSTATE_STORAGE, so no
+environment can fall back to another subscription. Then, in each of ${repos[*]} (Settings > Environments),
+set the rules of ${environments[0]}. Production: add yourself as a required reviewer and allow deployments from
+the main branch only. Develop: allow the develop branch only. See docs/azure.md.
 
 For a deploy from your own PC, copy backend.hcl.example to backend.hcl with the same state values.
 EOF

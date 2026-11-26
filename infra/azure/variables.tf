@@ -1,6 +1,7 @@
 variable "name" {
-  description = "Short name used in resource names. Lowercase letters and digits."
+  description = "Short name used in resource names. Lowercase letters and digits. The same in every environment: each one has its own subscription."
   type        = string
+  default     = "ckhub"
 
   validation {
     condition     = can(regex("^[a-z0-9]{3,12}$", var.name))
@@ -9,8 +10,9 @@ variable "name" {
 }
 
 variable "resource_group_name" {
-  description = "The resource group bootstrap.sh made for the Hub. Everything is created inside it, in its region."
+  description = "The resource group bootstrap.sh made for the Hub (it makes rg-ckhub in each subscription). Everything is created inside it, in its region."
   type        = string
+  default     = "rg-ckhub"
 }
 
 variable "image" {
@@ -131,4 +133,10 @@ variable "mail_domain" {
     condition     = var.mail_domain == "" || can(regex("^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}$", var.mail_domain))
     error_message = "Use a lowercase domain such as mail.dev.contestkeeper.com."
   }
+}
+
+variable "image_publisher_subject" {
+  description = "The GitHub OIDC subject allowed to upload images to the downloads container, for example repo:contest-keeper/ck-os:environment:develop (use the form GitHub shows in the token when the organisation uses repository ids). Leave empty to make no publisher identity."
+  type        = string
+  default     = ""
 }

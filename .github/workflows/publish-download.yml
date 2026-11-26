@@ -43,9 +43,9 @@ jobs:
     steps:
       - name: Check the inputs
         run: |
+          # Each environment has its own subscription, so the group has the same name in both (bootstrap.sh).
           case "$ENVIRONMENT" in
-            develop) echo "RESOURCE_GROUP=rg-ckhub-dev" >> "$GITHUB_ENV" ;;
-            production) echo "RESOURCE_GROUP=rg-ckhub" >> "$GITHUB_ENV" ;;
+            develop|production) echo "RESOURCE_GROUP=rg-ckhub" >> "$GITHUB_ENV" ;;
             *) echo "environment must be develop or production" >&2; exit 1 ;;
           esac
           [[ "$FOLDER" =~ ^[a-z0-9-]+$ ]] || { echo "folder must be lowercase letters, digits and dashes" >&2; exit 1; }
