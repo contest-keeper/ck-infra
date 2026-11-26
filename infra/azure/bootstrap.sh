@@ -30,6 +30,10 @@ location="${2:?Give the region, for example germanywestcentral: a new subscripti
 owner="${3:-contest-keeper}"
 # The repositories whose workflows deploy: ck-hub after its builds and releases, ck-infra by hand.
 repos=("ck-hub" "ck-infra")
+# Reusable workflows read the variables and sign in as the repository that calls them: the website and Forge call the
+# develop deploy and publish workflows too.
+deploy_repos=("${repos[@]}")
+[[ "${1:-}" == develop ]] && deploy_repos+=("ck-forge" "ck-website")
 state_group="rg-ckhub-tfstate"
 # The subscription is the environment, so the group has the same name in each (must match variables.tf).
 env_group="rg-ckhub"
@@ -94,6 +98,7 @@ delete_ok="!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'}) OR
 rbac_condition="((${write_ok})) AND ((${delete_ok}))"
 
 # One identity per environment.
+owner_id=$(gh api "orgs/${owner}" --jq .id)
 declare -A client_ids
 for environment in "${environments[@]}"; do
   app_name="ck-hub-deploy-${environment}"
@@ -106,17 +111,23 @@ for environment in "${environments[@]}"; do
   fi
   principal_id=$(az ad sp show --id "$client_id" --query id -o tsv)
 
-  # Azure accepts a GitHub token only for this environment of these repositories.
-  for repo in "${repos[@]}"; do
-    subject="repo:${owner}/${repo}:environment:${environment}"
-    if [[ -z "$(az ad app federated-credential list --id "$client_id" --query "[?subject=='$subject'].name" -o tsv)" ]]; then
-      az ad app federated-credential create --id "$client_id" --parameters "{
-        \"name\": \"github-${repo}-${environment}\",
-        \"issuer\": \"https://token.actions.githubusercontent.com\",
-        \"subject\": \"${subject}\",
-        \"audiences\": [\"api://AzureADTokenExchange\"]
-      }" --output none
-    fi
+  # Azure accepts a GitHub token only for this environment of these repositories. This organization's tokens carry the
+  # owner and repository ids in the subject (customised OIDC claims), so the credential is made for that form as well as
+  # for the plain one: without it the login stops with AADSTS700213 "No matching federated identity record".
+  for repo in "${deploy_repos[@]}"; do
+    repo_id=$(gh api "repos/${owner}/${repo}" --jq .id)
+    subjects=("repo:${owner}/${repo}:environment:${environment}"       "repo:${owner}@${owner_id}/${repo}@${repo_id}:environment:${environment}")
+    for index in 0 1; do
+      subject="${subjects[$index]}"
+      if [[ -z "$(az ad app federated-credential list --id "$client_id" --query "[?subject=='$subject'].name" -o tsv)" ]]; then
+        az ad app federated-credential create --id "$client_id" --parameters "{
+          \"name\": \"github-${repo}-${environment}-${index}\",
+          \"issuer\": \"https://token.actions.githubusercontent.com\",
+          \"subject\": \"${subject}\",
+          \"audiences\": [\"api://AzureADTokenExchange\"]
+        }" --output none
+      fi
+    done
   done
 
   # Rights on this environment's resource group only. "Role Based Access Control Administrator"
@@ -167,11 +178,7 @@ differ per environment, so they are variables of the ${environments[0]} environm
   gh variable set AZURE_TENANT_ID                       --org ${owner} --visibility all --body "${tenant_id}"
   gh variable set AZURE_CLIENT_ID_${environments[0]^^}  --org ${owner} --visibility all --body "${client_ids[${environments[0]}]}"
 EOF
-# Reusable workflows read the variables of the repository that calls them: the website and Forge call the develop
-# deploy and publish workflows too.
-variable_repos=("${repos[@]}")
-[[ "${environments[0]}" == develop ]] && variable_repos+=("ck-forge" "ck-website")
-for repo in "${variable_repos[@]}"; do
+for repo in "${deploy_repos[@]}"; do
   cat <<EOF
   gh api -X PUT repos/${owner}/${repo}/environments/${environments[0]} --silent
   gh variable set AZURE_SUBSCRIPTION_ID  --repo ${owner}/${repo} --env ${environments[0]} --body "${subscription_id}"
@@ -182,7 +189,7 @@ done
 cat <<EOF
 
 Remove the old organization variables AZURE_SUBSCRIPTION_ID, TFSTATE_RESOURCE_GROUP and TFSTATE_STORAGE, so no
-environment can fall back to another subscription. Then, in each of ${repos[*]} (Settings > Environments),
+environment can fall back to another subscription. Then, in each of ${deploy_repos[*]} (Settings > Environments),
 set the rules of ${environments[0]}. Production: add yourself as a required reviewer and allow deployments from
 the main branch only. Develop: allow the develop branch only. See docs/azure.md.
 
