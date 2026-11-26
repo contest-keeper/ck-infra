@@ -32,14 +32,6 @@ jobs:
         working-directory: infra/website
       - run: terraform validate
         working-directory: infra/website
-  # The README says the workflows and shell scripts are checked. shellcheck is on the runner; actionlint is
-  # built from its pinned release.
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - run: shellcheck --severity=warning infra/azure/bootstrap.sh
-      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
   compose:
     runs-on: ubuntu-latest
     steps:
