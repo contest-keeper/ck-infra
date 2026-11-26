@@ -53,16 +53,22 @@ variable "min_replicas" {
   }
 }
 
-variable "db_password_version" {
-  description = "Raise this number to make a new database password. The password is kept in the private Terraform state."
-  type        = number
-  default     = 1
+variable "neon_org_id" {
+  description = "The Neon organization the database project is made in (Neon console, Organization settings). Not a secret. Leave empty for an API key that belongs to one organization."
+  type        = string
+  default     = ""
 }
 
-variable "allowed_client_ips" {
-  description = "Public IPv4 addresses allowed to reach the database directly, for example yours while you make the first organizer account. Leave empty otherwise."
-  type        = list(string)
-  default     = []
+variable "neon_region" {
+  description = "The Neon region of the database. Keep it close to the Hub and inside the EU."
+  type        = string
+  default     = "aws-eu-central-1"
+}
+
+variable "neon_history_retention_seconds" {
+  description = "How far back Neon can restore the database. The free plan allows at most 6 hours."
+  type        = number
+  default     = 21600
 }
 
 variable "tags" {

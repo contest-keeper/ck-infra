@@ -16,7 +16,7 @@ output "key_vault" {
 }
 
 output "database_host" {
-  value = azurerm_postgresql_flexible_server.this.fqdn
+  value = neon_project.this.database_host
 }
 
 output "download_storage_account" {

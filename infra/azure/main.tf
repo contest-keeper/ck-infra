@@ -11,13 +11,6 @@ locals {
   base   = "${var.name}-${local.suffix}"
 }
 
-# The generated password is kept in the Terraform state (private, Azure AD only). The Container App no
-# longer holds it: it reads the database address from the Key Vault through its own identity (below).
-resource "random_password" "db" {
-  length  = 40
-  special = false
-}
-
 # Made by bootstrap.sh, so the identity that deploys needs rights on this one group only.
 data "azurerm_resource_group" "this" {
   name = var.resource_group_name
@@ -25,81 +18,28 @@ data "azurerm_resource_group" "this" {
 
 # ---------------------------------------------------------------- database
 
-resource "azurerm_postgresql_flexible_server" "this" {
-  name                = "psql-${local.base}"
-  resource_group_name = data.azurerm_resource_group.this.name
-  location            = data.azurerm_resource_group.this.location
-  version             = "16"
-  sku_name            = "B_Standard_B1ms"
-  storage_mb          = 32768
+# Postgres at Neon (the free plan): it sleeps when idle, so an environment that is not used costs nothing. TLS is
+# required by Neon. The password is made by Neon and kept in the private Terraform state (Azure AD only); the
+# Container App reads the database address from the Key Vault through its own identity (below). The Hub reopens a
+# connection that Neon closed while asleep, and its only background queries are the hourly clean-ups.
+resource "neon_project" "this" {
+  name       = local.base
+  org_id     = var.neon_org_id != "" ? var.neon_org_id : null
+  region_id  = var.neon_region
+  pg_version = 16
 
-  administrator_login               = "ckhub"
-  administrator_password_wo         = random_password.db.result
-  administrator_password_wo_version = var.db_password_version
+  history_retention_seconds = var.neon_history_retention_seconds
 
-  backup_retention_days         = 7
-  geo_redundant_backup_enabled  = false
-  public_network_access_enabled = true
-  tags                          = var.tags
+  branch {
+    name          = "main"
+    database_name = "ckhub"
+    role_name     = "ckhub"
+  }
 
   lifecycle {
     # A plan that would delete or replace the database fails here instead of being applied.
     prevent_destroy = true
-    # The zone Azure picks at creation must not make Terraform want to move the server.
-    ignore_changes = [zone]
   }
-}
-
-resource "azurerm_postgresql_flexible_server_database" "hub" {
-  name      = "ckhub"
-  server_id = azurerm_postgresql_flexible_server.this.id
-  charset   = "UTF8"
-  collation = "en_US.utf8"
-}
-
-# Plain connections are refused: the Hub connects over TLS (sslmode=require in its address).
-resource "azurerm_postgresql_flexible_server_configuration" "require_tls" {
-  name      = "require_secure_transport"
-  server_id = azurerm_postgresql_flexible_server.this.id
-  value     = "on"
-}
-
-resource "azurerm_postgresql_flexible_server_configuration" "min_tls" {
-  name      = "ssl_min_protocol_version"
-  server_id = azurerm_postgresql_flexible_server.this.id
-  value     = "TLSv1.2"
-}
-
-# Only the Container App's own outbound addresses may reach the database (it is not on a virtual
-# network: the shared environment it joins has none, and a Flexible Server can only be made private
-# at creation). The app lists one to a few addresses; there are a fixed number of rules, and a spare
-# one repeats the last address, so the rule names stay stable while the list is unknown at plan time.
-# Every deploy refreshes them, so a changed address follows the next deploy.
-locals {
-  app_outbound_ips = azurerm_container_app.hub.outbound_ip_addresses
-}
-
-resource "azurerm_postgresql_flexible_server_firewall_rule" "app" {
-  count            = 4
-  name             = "app-outbound-${count.index}"
-  server_id        = azurerm_postgresql_flexible_server.this.id
-  start_ip_address = local.app_outbound_ips[min(count.index, length(local.app_outbound_ips) - 1)]
-  end_ip_address   = local.app_outbound_ips[min(count.index, length(local.app_outbound_ips) - 1)]
-
-  lifecycle {
-    precondition {
-      condition     = length(local.app_outbound_ips) >= 1 && length(local.app_outbound_ips) <= 4
-      error_message = "The Container App lists ${length(local.app_outbound_ips)} outbound addresses; the database rules cover 1 to 4."
-    }
-  }
-}
-
-resource "azurerm_postgresql_flexible_server_firewall_rule" "client" {
-  count            = length(var.allowed_client_ips)
-  name             = "client-${count.index}"
-  server_id        = azurerm_postgresql_flexible_server.this.id
-  start_ip_address = var.allowed_client_ips[count.index]
-  end_ip_address   = var.allowed_client_ips[count.index]
 }
 
 # ---------------------------------------------------------------- secrets
@@ -134,12 +74,11 @@ resource "time_sleep" "rbac" {
 }
 
 resource "azurerm_key_vault_secret" "database_url" {
-  name             = "database-url"
-  key_vault_id     = azurerm_key_vault.this.id
-  value_wo         = "postgres://ckhub:${random_password.db.result}@${azurerm_postgresql_flexible_server.this.fqdn}:5432/${azurerm_postgresql_flexible_server_database.hub.name}?sslmode=require"
-  value_wo_version = var.db_password_version
-  content_type     = "text/plain"
-  tags             = var.tags
+  name         = "database-url"
+  key_vault_id = azurerm_key_vault.this.id
+  value        = "postgres://${neon_project.this.database_user}:${neon_project.this.database_password}@${neon_project.this.database_host}/${neon_project.this.database_name}?sslmode=require"
+  content_type = "text/plain"
+  tags         = var.tags
 
   depends_on = [time_sleep.rbac]
 }
@@ -375,6 +314,12 @@ resource "azurerm_container_app" "hub" {
       env {
         name        = "CK_DATABASE_URL"
         secret_name = "database-url"
+      }
+
+      # A new database makes a new revision, which reads the new address from the Key Vault at once.
+      env {
+        name  = "CK_DATABASE_ID"
+        value = neon_project.this.id
       }
 
       # Names the identity that signs storage links.

@@ -11,6 +11,11 @@ terraform {
       source  = "cloudflare/cloudflare"
       version = "~> 5.29"
     }
+    # A community provider (Neon's documented one). Pinned to a minor version: a newer one is a reviewed change.
+    neon = {
+      source  = "kislerdm/neon"
+      version = "~> 0.18.0"
+    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.9"
@@ -36,6 +41,9 @@ provider "azurerm" {
   # The subscription comes from ARM_SUBSCRIPTION_ID (the deploy workflow sets it) or `az login`.
   # Nothing in this folder holds a credential: the workflow signs in with OIDC.
 }
+
+# The key comes from NEON_API_KEY (the deploy workflow sets it from a GitHub secret).
+provider "neon" {}
 
 # The token comes from CLOUDFLARE_API_TOKEN (the deploy workflow sets it from a GitHub secret). Without a
 # zone id no record is made, and then the provider is never used, so no token is needed.
