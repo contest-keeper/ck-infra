@@ -189,7 +189,7 @@ done
 cat <<EOF
 
 Remove the old organization variables AZURE_SUBSCRIPTION_ID, TFSTATE_RESOURCE_GROUP and TFSTATE_STORAGE, so no
-environment can fall back to another subscription. Then, in each of ${repos[*]} (Settings > Environments),
+environment can fall back to another subscription. Then, in each of ${deploy_repos[*]} (Settings > Environments),
 set the rules of ${environments[0]}. Production: add yourself as a required reviewer and allow deployments from
 the main branch only. Develop: allow the develop branch only. See docs/azure.md.
 
