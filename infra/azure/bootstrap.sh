@@ -167,7 +167,11 @@ differ per environment, so they are variables of the ${environments[0]} environm
   gh variable set AZURE_TENANT_ID                       --org ${owner} --visibility all --body "${tenant_id}"
   gh variable set AZURE_CLIENT_ID_${environments[0]^^}  --org ${owner} --visibility all --body "${client_ids[${environments[0]}]}"
 EOF
-for repo in "${repos[@]}"; do
+# Reusable workflows read the variables of the repository that calls them: the website and Forge call the develop
+# deploy and publish workflows too.
+variable_repos=("${repos[@]}")
+[[ "${environments[0]}" == develop ]] && variable_repos+=("ck-forge" "ck-website")
+for repo in "${variable_repos[@]}"; do
   cat <<EOF
   gh api -X PUT repos/${owner}/${repo}/environments/${environments[0]} --silent
   gh variable set AZURE_SUBSCRIPTION_ID  --repo ${owner}/${repo} --env ${environments[0]} --body "${subscription_id}"
