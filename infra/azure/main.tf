@@ -209,6 +209,18 @@ resource "azurerm_log_analytics_workspace" "this" {
   tags                = var.tags
 }
 
+# Send Key Vault audit events to the Hub's Log Analytics workspace so secret reads and key operations are logged.
+resource "azurerm_monitor_diagnostic_setting" "key_vault" {
+  count                      = local.own_environment ? 1 : 0
+  name                       = "kv-audit-logs"
+  target_resource_id         = azurerm_key_vault.this.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.this[0].id
+
+  enabled_log {
+    category = "AuditEvent"
+  }
+}
+
 resource "azurerm_container_app_environment" "this" {
   count                      = local.own_environment ? 1 : 0
   name                       = "cae-${local.base}"

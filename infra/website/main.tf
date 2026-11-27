@@ -21,7 +21,10 @@ resource "azurerm_storage_account" "site" {
   min_tls_version                 = "TLS1_2"
   https_traffic_only_enabled      = true
   allow_nested_items_to_be_public = false
-  tags                            = var.tags
+  # No account key can sign or read anything: deploys upload with the deploy identity (--auth-mode login)
+  # and Terraform reads/configures the static website over Entra ID (storage_use_azuread = true).
+  shared_access_key_enabled = false
+  tags                      = var.tags
 }
 
 resource "azurerm_storage_account_static_website" "site" {
