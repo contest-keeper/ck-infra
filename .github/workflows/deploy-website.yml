@@ -76,7 +76,9 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/tf-plugin-cache"
           echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/tf-plugin-cache" >> "$GITHUB_ENV"
+      # Terraform only uses cached providers it can check against a lockfile; an infra_ref without one gains nothing.
       - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        if: hashFiles('infra/website/.terraform.lock.hcl') != ''
         with:
           path: ${{ runner.temp }}/tf-plugin-cache
           key: tf-plugins-website-linux-${{ hashFiles('infra/website/.terraform.lock.hcl') }}
