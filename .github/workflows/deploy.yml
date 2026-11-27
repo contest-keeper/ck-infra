@@ -11,6 +11,7 @@ name: Deploy Hub (reusable)
 # The non-secret identifiers come from GitHub variables (organization or repository level):
 #   AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, TFSTATE_RESOURCE_GROUP, TFSTATE_STORAGE,
 #   AZURE_CLIENT_ID_DEVELOP, AZURE_CLIENT_ID_PRODUCTION   (bootstrap.sh prints them)
+#   OUTAGE_QUEUE   (per environment: true makes the queue and the proxy in front of the Hub. Run bootstrap.sh first)
 #   HUB_DOMAIN, MAIL_DOMAIN   (per environment: where the Hub answers and sends mail from, for example hub.dev.contestkeeper.com
 #                              and mail.dev.contestkeeper.com. Empty: no custom domain / no mail)
 #   IMAGE_PUBLISHER_SUBJECT   (develop: the GitHub OIDC subject of the ck-os image workflow. Empty: no publisher identity)
@@ -77,6 +78,7 @@ jobs:
       TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
       # Per environment, so another deployment (a contest's own Hub) only needs other variables. Empty: no custom domain / no mail.
       TF_VAR_custom_domain: ${{ vars.HUB_DOMAIN }}
+      TF_VAR_outage_queue: ${{ vars.OUTAGE_QUEUE == 'true' }}
       TF_VAR_mail_domain: ${{ vars.MAIL_DOMAIN }}
       TF_VAR_image_publisher_subject: ${{ vars.IMAGE_PUBLISHER_SUBJECT }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare_token }}
@@ -164,6 +166,8 @@ jobs:
             echo "Address: $(terraform output -raw hub_url)"
             echo "Container app: $(terraform output -raw container_app)"
             echo "Key Vault: $(terraform output -raw key_vault)"
+            proxy="$(terraform output -raw ingress_url 2>/dev/null || true)"
+            if [[ "$proxy" == https://* ]]; then echo "Status page: ${proxy}/status"; fi
           } >> "$GITHUB_STEP_SUMMARY"
       # The develop copy sleeps when idle, so give it time to wake up.
       - name: Check the Hub answers and can sign
@@ -177,6 +181,19 @@ jobs:
             if [ "$attempt" = 12 ]; then echo "The Hub at ${url} did not answer after the deploy" >&2; exit 1; fi
             sleep 10
           done
+          # The proxy in front of the Hub: its own page, and the Hub through it.
+          # Production runs the Terraform of main, which may not have the output yet; it is empty when the
+          # queue is off.
+          proxy="$(terraform output -raw ingress_url 2>/dev/null || true)"
+          if [[ "$proxy" == https://* ]]; then
+            for path in /status /; do
+              # curl's own failure counts too: an answer can say 200 and never finish.
+              if ! code="$(curl -s -o /dev/null -w '%{http_code}' --retry 6 --retry-all-errors --retry-delay 10 --max-time 30 "$proxy$path")" || [ "$code" != 200 ]; then
+                echo "The proxy at ${proxy} does not answer ${path} (HTTP ${code})" >&2; exit 1
+              fi
+              echo "proxy ${path}: HTTP ${code}"
+            done
+          fi
           # The public key route answers 200 only when the Hub holds a signing key (404 otherwise).
           if [ "$HAS_SIGNING_KEY" = true ]; then
             code="$(curl -s -o key.json -w '%{http_code}' --max-time 20 "$url/api/v1/config-signing-key" || true)"

@@ -171,6 +171,7 @@ resource "time_sleep" "hub_roles" {
     azurerm_role_assignment.hub_delegator,
     azurerm_role_assignment.hub_downloads,
     azurerm_role_assignment.hub_recordings,
+    azurerm_role_assignment.hub_queue,
   ]
 }
 
@@ -265,6 +266,16 @@ resource "azurerm_container_app" "hub" {
     }
   }
 
+  # What the proxy in front of the Hub proves itself with.
+  dynamic "secret" {
+    for_each = var.outage_queue ? [1] : []
+
+    content {
+      name  = "ingress-secret"
+      value = random_password.ingress[0].result
+    }
+  }
+
   dynamic "secret" {
     for_each = local.mail ? [1] : []
 
@@ -355,6 +366,25 @@ resource "azurerm_container_app" "hub" {
         value = azurerm_storage_container.recordings.name
       }
 
+      # What waited while the Hub could not be reached.
+      dynamic "env" {
+        for_each = var.outage_queue ? [1] : []
+
+        content {
+          name  = "CK_QUEUE_URL"
+          value = local.queue_url
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.outage_queue ? [1] : []
+
+        content {
+          name        = "CK_INGRESS_SECRET"
+          secret_name = "ingress-secret"
+        }
+      }
+
       dynamic "env" {
         for_each = var.config_signing_key != "" ? [1] : []
 
@@ -395,6 +425,9 @@ resource "azurerm_container_app" "hub" {
 locals {
   # Both the hostname and the zone it lives in are needed for Terraform to make the DNS records.
   manage_dns = var.custom_domain != "" && var.cloudflare_zone_id != ""
+
+  # The app the custom domain leads to: the proxy once the cut over is made, the Hub until then.
+  front = var.ingress_serves_domain ? azurerm_container_app.ingress[0] : azurerm_container_app.hub
 }
 
 # The records Azure looks for before it adds the name. Both stay "DNS only": a proxied record hides them
@@ -404,7 +437,7 @@ resource "cloudflare_dns_record" "hub_cname" {
   zone_id = var.cloudflare_zone_id
   name    = var.custom_domain
   type    = "CNAME"
-  content = azurerm_container_app.hub.ingress[0].fqdn
+  content = local.front.ingress[0].fqdn
   ttl     = 1
   proxied = false
   comment = "Keeper Hub (${var.name}), made by Terraform"
@@ -415,7 +448,7 @@ resource "cloudflare_dns_record" "hub_verification" {
   zone_id = var.cloudflare_zone_id
   name    = "asuid.${var.custom_domain}"
   type    = "TXT"
-  content = azurerm_container_app.hub.custom_domain_verification_id
+  content = local.front.custom_domain_verification_id
   ttl     = 1
   comment = "Azure domain check for Keeper Hub (${var.name}), made by Terraform"
 }
@@ -424,7 +457,9 @@ resource "cloudflare_dns_record" "hub_verification" {
 resource "time_sleep" "dns" {
   count           = local.manage_dns ? 1 : 0
   create_duration = "60s"
-  depends_on      = [cloudflare_dns_record.hub_cname, cloudflare_dns_record.hub_verification]
+  # Waits again when the records change to another app.
+  triggers   = { target = local.front.ingress[0].fqdn }
+  depends_on = [cloudflare_dns_record.hub_cname, cloudflare_dns_record.hub_verification]
 }
 
 # Azure checks the DNS records before it adds the name, and then issues and renews a free certificate for
@@ -433,7 +468,7 @@ resource "time_sleep" "dns" {
 resource "azurerm_container_app_custom_domain" "hub" {
   count            = var.custom_domain != "" ? 1 : 0
   name             = var.custom_domain
-  container_app_id = azurerm_container_app.hub.id
+  container_app_id = local.front.id
 
   depends_on = [time_sleep.dns]
 
@@ -448,13 +483,13 @@ resource "azurerm_container_app_custom_domain" "hub" {
 # an ordinary deploy, and it is safe to repeat. The deploy has signed in with az already.
 resource "terraform_data" "hub_certificate" {
   count            = var.custom_domain != "" ? 1 : 0
-  triggers_replace = [azurerm_container_app_custom_domain.hub[0].id, azurerm_container_app.hub.id]
+  triggers_replace = [azurerm_container_app_custom_domain.hub[0].id, local.front.id]
 
   provisioner "local-exec" {
     command = join(" ", [
       "az containerapp hostname bind",
       "--resource-group ${data.azurerm_resource_group.this.name}",
-      "--name ${azurerm_container_app.hub.name}",
+      "--name ${local.front.name}",
       "--hostname ${var.custom_domain}",
       "--environment ${local.own_environment ? azurerm_container_app_environment.this[0].id : data.azurerm_container_app_environment.shared[0].id}",
       "--validation-method CNAME",
