@@ -44,6 +44,7 @@ jobs:
       ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       TF_IN_AUTOMATION: "true"
+      TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
       TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
       # Per environment (empty: only the storage address).
       TF_VAR_public_hostname: ${{ vars.WEBSITE_DOMAIN }}
@@ -72,6 +73,11 @@ jobs:
         with:
           terraform_version: 1.17.2
           terraform_wrapper: false
+      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: ${{ runner.temp }}/tf-plugin-cache
+          key: terraform-plugins-linux-${{ hashFiles('infra/**/.terraform.lock.hcl', 'infra/**/versions.tf') }}
+          restore-keys: terraform-plugins-linux-
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
           client-id: ${{ env.ARM_CLIENT_ID }}
@@ -83,6 +89,7 @@ jobs:
           STATE_GROUP: ${{ vars.TFSTATE_RESOURCE_GROUP }}
           STATE_STORAGE: ${{ vars.TFSTATE_STORAGE }}
         run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
           terraform init -input=false \
             -backend-config="resource_group_name=${STATE_GROUP}" \
             -backend-config="storage_account_name=${STATE_STORAGE}" \
