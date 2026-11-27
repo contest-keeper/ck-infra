@@ -24,6 +24,8 @@ provider "azurerm" {
   features {}
   # Resource providers are registered once by bootstrap.sh.
   resource_provider_registrations = "none"
+  # Storage is reached with the deploy identity, not an account key (the site account has keys off).
+  storage_use_azuread = true
 }
 
 # The token comes from CLOUDFLARE_API_TOKEN (the deploy workflow sets it from a GitHub secret). Without a zone
