@@ -5,11 +5,15 @@
 # The Hub believes the client address the proxy sends only together with this secret. Like the database
 # password it is kept in the Terraform state (private, Azure AD only).
 resource "random_password" "ingress" {
+  count = var.outage_queue ? 1 : 0
+
   length  = 48
   special = false
 }
 
 resource "azurerm_user_assigned_identity" "ingress" {
+  count = var.outage_queue ? 1 : 0
+
   name                = "id-${local.base}-ingress"
   resource_group_name = data.azurerm_resource_group.this.name
   location            = data.azurerm_resource_group.this.location
@@ -18,25 +22,33 @@ resource "azurerm_user_assigned_identity" "ingress" {
 
 # The status history, so it survives a restart. Its own container: the proxy reaches no installer or recording.
 resource "azurerm_storage_container" "status" {
+  count = var.outage_queue ? 1 : 0
+
   name                  = "status"
   storage_account_id    = azurerm_storage_account.downloads.id
   container_access_type = "private"
 }
 
 resource "azurerm_role_assignment" "ingress_queue" {
-  scope                = azurerm_servicebus_queue.reports.id
+  count = var.outage_queue ? 1 : 0
+
+  scope                = azurerm_servicebus_queue.reports[0].id
   role_definition_name = "Azure Service Bus Data Sender"
-  principal_id         = azurerm_user_assigned_identity.ingress.principal_id
+  principal_id         = azurerm_user_assigned_identity.ingress[0].principal_id
 }
 
 resource "azurerm_role_assignment" "ingress_status" {
-  scope                = azurerm_storage_container.status.id
+  count = var.outage_queue ? 1 : 0
+
+  scope                = azurerm_storage_container.status[0].id
   role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = azurerm_user_assigned_identity.ingress.principal_id
+  principal_id         = azurerm_user_assigned_identity.ingress[0].principal_id
 }
 
 # New role assignments take a moment to apply.
 resource "time_sleep" "ingress_roles" {
+  count = var.outage_queue ? 1 : 0
+
   create_duration = "60s"
   depends_on = [
     azurerm_role_assignment.ingress_queue,
@@ -45,6 +57,8 @@ resource "time_sleep" "ingress_roles" {
 }
 
 resource "azurerm_container_app" "ingress" {
+  count = var.outage_queue ? 1 : 0
+
   name                         = "ca-${local.base}-in"
   resource_group_name          = data.azurerm_resource_group.this.name
   container_app_environment_id = local.own_environment ? azurerm_container_app_environment.this[0].id : data.azurerm_container_app_environment.shared[0].id
@@ -53,12 +67,12 @@ resource "azurerm_container_app" "ingress" {
 
   identity {
     type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.ingress.id]
+    identity_ids = [azurerm_user_assigned_identity.ingress[0].id]
   }
 
   secret {
     name  = "ingress-secret"
-    value = random_password.ingress.result
+    value = random_password.ingress[0].result
   }
 
   dynamic "secret" {
@@ -123,12 +137,12 @@ resource "azurerm_container_app" "ingress" {
 
       env {
         name  = "CK_STATUS_URL"
-        value = "${azurerm_storage_account.downloads.primary_blob_endpoint}${azurerm_storage_container.status.name}/history.json"
+        value = "${azurerm_storage_account.downloads.primary_blob_endpoint}${azurerm_storage_container.status[0].name}/history.json"
       }
 
       env {
         name  = "AZURE_CLIENT_ID"
-        value = azurerm_user_assigned_identity.ingress.client_id
+        value = azurerm_user_assigned_identity.ingress[0].client_id
       }
 
       # Only that it listens: a page would be asked of the Hub, and the proxy must stay up without it.

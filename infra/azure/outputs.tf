@@ -4,12 +4,12 @@ output "hub_url" {
 }
 
 output "ingress_url" {
-  description = "The proxy in front of the Hub, on Azure's own address. Its status page is at /status."
-  value       = "https://${azurerm_container_app.ingress.ingress[0].fqdn}"
+  description = "The proxy in front of the Hub, on Azure's own address. Its status page is at /status. Empty when outage_queue is off."
+  value       = var.outage_queue ? "https://${azurerm_container_app.ingress[0].ingress[0].fqdn}" : ""
 }
 
 output "queue_url" {
-  description = "The Service Bus queue that holds what waited while the Hub could not take it."
+  description = "The Service Bus queue that holds what waited while the Hub could not take it. Empty when outage_queue is off."
   value       = local.queue_url
 }
 

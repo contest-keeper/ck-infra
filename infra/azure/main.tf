@@ -267,9 +267,13 @@ resource "azurerm_container_app" "hub" {
   }
 
   # What the proxy in front of the Hub proves itself with.
-  secret {
-    name  = "ingress-secret"
-    value = random_password.ingress.result
+  dynamic "secret" {
+    for_each = var.outage_queue ? [1] : []
+
+    content {
+      name  = "ingress-secret"
+      value = random_password.ingress[0].result
+    }
   }
 
   dynamic "secret" {
@@ -363,14 +367,22 @@ resource "azurerm_container_app" "hub" {
       }
 
       # What waited while the Hub could not be reached.
-      env {
-        name  = "CK_QUEUE_URL"
-        value = local.queue_url
+      dynamic "env" {
+        for_each = var.outage_queue ? [1] : []
+
+        content {
+          name  = "CK_QUEUE_URL"
+          value = local.queue_url
+        }
       }
 
-      env {
-        name        = "CK_INGRESS_SECRET"
-        secret_name = "ingress-secret"
+      dynamic "env" {
+        for_each = var.outage_queue ? [1] : []
+
+        content {
+          name        = "CK_INGRESS_SECRET"
+          secret_name = "ingress-secret"
+        }
       }
 
       dynamic "env" {
@@ -415,7 +427,7 @@ locals {
   manage_dns = var.custom_domain != "" && var.cloudflare_zone_id != ""
 
   # The app the custom domain leads to: the proxy once the cut over is made, the Hub until then.
-  front = var.ingress_serves_domain ? azurerm_container_app.ingress : azurerm_container_app.hub
+  front = var.ingress_serves_domain ? azurerm_container_app.ingress[0] : azurerm_container_app.hub
 }
 
 # The records Azure looks for before it adds the name. Both stay "DNS only": a proxied record hides them
