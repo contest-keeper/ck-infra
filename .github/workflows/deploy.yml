@@ -122,8 +122,8 @@ jobs:
       - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ${{ runner.temp }}/tf-plugin-cache
-          key: terraform-plugins-linux-${{ hashFiles('infra/**/.terraform.lock.hcl', 'infra/**/versions.tf') }}
-          restore-keys: terraform-plugins-linux-
+          key: tf-plugins-hub-linux-${{ hashFiles('infra/azure/.terraform.lock.hcl') }}
+          restore-keys: tf-plugins-hub-linux-
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
           client-id: ${{ env.ARM_CLIENT_ID }}
