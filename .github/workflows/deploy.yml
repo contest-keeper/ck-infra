@@ -83,7 +83,6 @@ jobs:
       TF_VAR_neon_org_id: ${{ vars.NEON_ORG_ID }}
       NEON_API_KEY: ${{ secrets.neon_api_key }}
       TF_IN_AUTOMATION: "true"
-      TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
       # Only whether it is set, never its value.
       HAS_SIGNING_KEY: ${{ secrets.config_signing_key != '' }}
     defaults:
@@ -116,7 +115,11 @@ jobs:
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
         with:
           terraform_version: 1.17.2
-      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+      - name: Set Terraform plugin cache directory
+        run: |
+          mkdir -p "$RUNNER_TEMP/tf-plugin-cache"
+          echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/tf-plugin-cache" >> "$GITHUB_ENV"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ${{ runner.temp }}/tf-plugin-cache
           key: terraform-plugins-linux-${{ hashFiles('infra/**/.terraform.lock.hcl', 'infra/**/versions.tf') }}
@@ -131,7 +134,6 @@ jobs:
           STATE_GROUP: ${{ vars.TFSTATE_RESOURCE_GROUP }}
           STATE_STORAGE: ${{ vars.TFSTATE_STORAGE }}
         run: |
-          mkdir -p "$TF_PLUGIN_CACHE_DIR"
           terraform init -input=false \
             -backend-config="resource_group_name=${STATE_GROUP}" \
             -backend-config="storage_account_name=${STATE_STORAGE}" \
