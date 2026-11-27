@@ -47,8 +47,7 @@ read -r -p "Set up Keeper Hub (${environments[0]}) in this subscription? [y/N] "
 # Resource providers are registered here, once, because the identities GitHub signs in as have no
 # rights outside their resource group (the Terraform provider is told not to register them).
 for namespace in Microsoft.App Microsoft.KeyVault Microsoft.OperationalInsights \
-  Microsoft.ManagedIdentity Microsoft.Storage Microsoft.Authorization Microsoft.Network Microsoft.Communication \
-  Microsoft.Insights; do
+  Microsoft.ManagedIdentity Microsoft.Storage Microsoft.Authorization Microsoft.Network Microsoft.Communication   Microsoft.Insights Microsoft.ServiceBus; do
   az provider register --namespace "$namespace" --wait
 done
 
@@ -89,7 +88,8 @@ done
 # cannot make itself Owner.
 assignable_ids=""
 for role in "Key Vault Secrets Officer" "Key Vault Secrets User" "Storage Blob Delegator" \
-  "Storage Blob Data Reader" "Storage Blob Data Contributor"; do
+  "Storage Blob Data Reader" "Storage Blob Data Contributor" \
+  "Azure Service Bus Data Sender" "Azure Service Bus Data Receiver"; do
   id=$(az role definition list --name "$role" --query "[0].name" -o tsv)
   [[ -n "$id" ]] || { echo "Role not found: $role" >&2; exit 1; }
   assignable_ids="${assignable_ids:+$assignable_ids, }$id"
@@ -133,7 +133,8 @@ for environment in "${environments[@]}"; do
 
   # Rights on this environment's resource group only. "Role Based Access Control Administrator"
   # lets Terraform give the Hub's managed identity its roles (read secrets in the Key Vault, sign
-  # storage links, read and write its two containers); the condition above limits it to those roles, and
+  # storage links, read and write its containers, and the proxy and the Hub use the queue); the condition
+  # above limits it to those roles, and
   # it cannot reach anything outside the group. "Storage Blob Data Contributor" lets the publish and
   # website workflows upload with the identity (no storage account key) to the accounts in the group.
   group_id=$(az group show --name "$env_group" --query id -o tsv)

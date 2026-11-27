@@ -6,3 +6,5 @@ min_replicas = 0
 # develop Hub is the only reason to raise it.
 hub_cpu    = 0.25
 hub_memory = "0.5Gi"
+# The proxy in front of the Hub sleeps when idle. 1 keeps it always on, for about 6 USD a month.
+ingress_min_replicas = 0

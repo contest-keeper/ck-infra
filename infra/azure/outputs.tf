@@ -3,6 +3,16 @@ output "hub_url" {
   value       = "https://${azurerm_container_app.hub.ingress[0].fqdn}"
 }
 
+output "ingress_url" {
+  description = "The proxy in front of the Hub, on Azure's own address. Its status page is at /status."
+  value       = "https://${azurerm_container_app.ingress.ingress[0].fqdn}"
+}
+
+output "queue_url" {
+  description = "The Service Bus queue that holds what waited while the Hub could not take it."
+  value       = local.queue_url
+}
+
 output "resource_group" {
   value = data.azurerm_resource_group.this.name
 }
@@ -26,12 +36,12 @@ output "download_storage_account" {
 
 output "custom_domain_verification_id" {
   description = "The value of the TXT record asuid.<hostname> that proves to Azure you own the custom domain. It goes into a public DNS record, so it is not a secret."
-  value       = nonsensitive(azurerm_container_app.hub.custom_domain_verification_id)
+  value       = nonsensitive(local.front.custom_domain_verification_id)
 }
 
 output "custom_domain_target" {
   description = "What the CNAME record of the custom domain points to."
-  value       = azurerm_container_app.hub.ingress[0].fqdn
+  value       = local.front.ingress[0].fqdn
 }
 
 output "mail_domain_id" {

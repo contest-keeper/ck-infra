@@ -53,6 +53,35 @@ variable "min_replicas" {
   }
 }
 
+variable "ingress_min_replicas" {
+  description = "0 lets the proxy in front of the Hub sleep when idle: the first requests then wait a few seconds, and a stick that gives up sends its events again but loses a heartbeat. 1 keeps it always on (about 6 USD a month)."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.ingress_min_replicas == 0 || var.ingress_min_replicas == 1
+    error_message = "The proxy keeps its status history in memory, so it runs as at most one copy: use 0 or 1."
+  }
+}
+
+variable "ingress_cpu" {
+  description = "CPU of the proxy. Not yet load tested."
+  type        = number
+  default     = 0.25
+}
+
+variable "ingress_memory" {
+  description = "Memory of the proxy. Container Apps wants twice the vCPU."
+  type        = string
+  default     = "0.5Gi"
+}
+
+variable "ingress_serves_domain" {
+  description = "Lead custom_domain to the proxy instead of the Hub. Turn it on only after the proxy answers on its own address; the name and its certificate are moved, so it does not answer for some minutes."
+  type        = bool
+  default     = false
+}
+
 variable "neon_org_id" {
   description = "The Neon organization the database project is made in (Neon console, Organization settings). Not a secret. Leave empty for an API key that belongs to one organization."
   type        = string
